@@ -2,6 +2,7 @@ import * as diplomacy from "js-diplomacy"
 import { Game } from "./game"
 import { SimulatedAnnealing } from "./optimizer"
 
+export declare type Unit<Power> = diplomacy.standardRule.Unit<Power>
 export declare type Board<Power> = diplomacy.standardRule.Board<Power>
 export declare type Order<Power> = diplomacy.standardRule.Order.Order<Power>
 
@@ -25,7 +26,7 @@ export abstract class PlayerBase<Power> {
       case Phase.Movement:
         return this.nextMovementOrders(game)
       case Phase.Retreat:
-        return new Set() // TODO
+        return this.nextRetreatOrders(game)
       case Phase.Build:
         return new Set() // TODO
     }
@@ -257,5 +258,50 @@ export abstract class PlayerBase<Power> {
         break
     }
     return new Set(arr)
+  }
+
+  private nextRetreatOrders (game: Game<Power>): Set<Order<Power>> {
+    const units =
+      Array.from(game.board.unitStatuses).filter(x => x[0].power === this.power)
+    let orders = new Set(units.map(u => new Orders.Disband(u[0])))
+    let e = this.evaluateOrders(game, orders)
+    // Check all candidates
+    function dfs (index: number, orders: Set<Order<Power>>) {
+      const [unit, status] = units[index]
+
+      if (index === units.length - 1) {
+        // Disband
+        const c1 = new Set(Array.from(orders))
+        c1.add(new Orders.Disband(unit))
+        const e1 = this.evaluateOrders(game, orders)
+        if (e1 > e) {
+          orders = c1
+        }
+
+        // Retreat
+        Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
+          const c1 = new Set(Array.from(orders))
+          c1.add(new Orders.Retreat(unit, location))
+          const e1 = this.evaluateOrders(game, orders)
+          if (e1 > e) {
+            orders = c1
+          }
+        })
+      } else {
+        // Disband
+        const c1 = new Set(Array.from(orders))
+        c1.add(new Orders.Disband(unit))
+        dfs(index + 1, c1)
+
+        // Retreat
+        Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
+          const c1 = new Set(Array.from(orders))
+          c1.add(new Orders.Retreat(unit, location))
+          dfs(index + 1, c1)
+        })
+      }
+    }
+
+    return orders
   }
 }
