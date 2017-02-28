@@ -3,6 +3,7 @@ import { Game } from "./game"
 import { SimulatedAnnealing } from "./optimizer"
 
 export declare type Unit<Power> = diplomacy.standardRule.Unit<Power>
+export declare type Location<Power> = diplomacy.standardRule.Location<Power>
 export declare type Board<Power> = diplomacy.standardRule.Board<Power>
 export declare type Order<Power> = diplomacy.standardRule.Order.Order<Power>
 
@@ -11,6 +12,30 @@ const MilitaryBranch = diplomacy.standardRule.MilitaryBranch
 const Phase = diplomacy.standardRule.Phase
 const Orders = diplomacy.standardRule.Order
 const OrderType = Orders.OrderType
+
+// Ref: http://rextester.com/OUC90847
+function combinations<T>(array: Array<T>, k: number): Set<Array<T>> {
+  const combinations = new Set()
+  let cs: Array<T> = []
+
+  if (array.length < k) {
+    return combinations
+  }
+
+  function run(level: number, start: number){
+    for (let i = start; i < array.length - k + level + 1; i++) {
+      cs[level] = array[i]
+      if (level < k - 1) {
+        run(level + 1, i + 1)
+      } else {
+        combinations.add(cs)
+      }
+    }
+  }
+
+  run(0, 0)
+  return combinations
+}
 
 export interface PlayerBaseConfigs {
   simulatedAnnealingIteration: number
@@ -28,7 +53,7 @@ export abstract class PlayerBase<Power> {
       case Phase.Retreat:
         return this.nextRetreatOrders(game)
       case Phase.Build:
-        return new Set() // TODO
+        return this.nextBuildOrder(game)
     }
   }
 
@@ -276,6 +301,7 @@ export abstract class PlayerBase<Power> {
         const e1 = this.evaluateOrders(game, orders)
         if (e1 > e) {
           orders = c1
+          e = e1
         }
 
         // Retreat
@@ -285,6 +311,7 @@ export abstract class PlayerBase<Power> {
           const e1 = this.evaluateOrders(game, orders)
           if (e1 > e) {
             orders = c1
+            e = e1
           }
         })
       } else {
@@ -301,7 +328,99 @@ export abstract class PlayerBase<Power> {
         })
       }
     }
+    dfs(0, new Set())
 
     return orders
+  }
+
+  private nextBuildOrder (game: Game<Power>): Set<Order<Power>> {
+    // TODO
+    const n = Utils.numberOfBuildableUnits(game.board).get(this.power)
+
+    if (n === undefined) {
+      return new Set()
+    }
+
+    if (n > 0) {
+      let orders = new Set()
+      let e = this.evaluateOrders(game, orders)
+
+      const homes =
+        Array.from(game.board.map.locations).filter(l => {
+          const status = game.board.provinceStatuses.get(l.province)
+          return (l.province.homeOf === this.power) &&
+            (Array.from(game.board.units).every(u => u.location !== l)) &&
+            (status && status.occupied === this.power)
+        })
+
+      for (let i = 1; i <= n; i++) {
+        const cs = combinations(homes, i)
+
+        function search (locations: Array<Location<Power>>) {
+          function dfs(index: number, orders: Set<Order<Power>>) {
+            const l = locations[index]
+            if (index === locations.length - 1) {
+              l.militaryBranches.forEach(m => {
+                const c1 = new Set(Array.from(orders))
+                c1.add(new Orders.Build<Power>(new diplomacy.standardRule.Unit(m, l, this.power)))
+
+                const e1 = this.evaluateOrders(game, c1)
+                if (e1 > e) {
+                  orders = c1
+                  e = e1
+                }
+              })
+            } else {
+              l.militaryBranches.forEach(m => {
+                const c = new Set(Array.from(orders))
+                c.add(new Orders.Build<Power>(new diplomacy.standardRule.Unit(m, l, this.power)))
+                dfs(index + 1, c)
+              })
+            }
+          }
+          dfs(0, new Set())
+        }
+
+        cs.forEach(candidate => {
+          const ps = new Set(candidate.map(x => x.province))
+          if (ps.size !== candidate.length) {
+            return
+          }
+
+          search(candidate)
+        })
+      }
+      return orders
+    } else if (n < 0) {
+      let orders: Set<Order<Power>> | null = null
+      let e: number | null = null
+
+      const units =
+        Array.from(game.board.units).filter(u => u.power === this.power)
+      const cs = combinations(units, -n)
+
+      cs.forEach(candidate => {
+        const c1 = new Set(candidate.map(u => new Orders.Disband(u)))
+        const e1 = this.evaluateOrders(game, c1)
+
+        if (orders && e) {
+          if (e1 > e) {
+            orders = c1
+            e = e1
+          }
+        } else {
+          orders = c1
+          e = e1
+        }
+      })
+
+      if (orders === null) {
+        return new Set()
+      } else {
+        return orders
+      }
+    } else {
+      return new Set()
+    }
   }
 }
