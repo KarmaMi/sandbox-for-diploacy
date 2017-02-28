@@ -25,7 +25,7 @@
     "vinyl-source-stream": "^1.1.0"
   },
   "dependencies": {
-    "js-diplomacy": "^0.1.1",
+    "js-diplomacy": "^0.1.2",
     "vizdip": "^0.2.1"
   }
 }
