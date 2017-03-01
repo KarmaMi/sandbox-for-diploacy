@@ -46,10 +46,10 @@ export interface PlayerBaseConfigs {
 export abstract class PlayerBase<Power> {
   constructor (private configs: PlayerBaseConfigs, private power: Power) {}
 
-  nextOrders (game: Game<Power>): Set<Order<Power>> {
+  nextOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     switch (game.board.state.phase) {
       case Phase.Movement:
-        return this.nextMovementOrders(game)
+        return this.nextMovementOrders(game, callback)
       case Phase.Retreat:
         return this.nextRetreatOrders(game)
       case Phase.Build:
@@ -59,7 +59,7 @@ export abstract class PlayerBase<Power> {
 
   protected abstract evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>): number
 
-  private nextMovementOrders (game: Game<Power>): Set<Order<Power>> {
+  private nextMovementOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     const $$ = new diplomacy.standardRule.Helper(game.board)
 
     // orders that all units hold
@@ -100,7 +100,14 @@ export abstract class PlayerBase<Power> {
     let optimal = allHolds
     let e = eForAllHolds
     for (let i = 0; i < this.configs.optimizeIteration; i++) {
-      const c = optimizer.optimize(allHolds)
+      const c = optimizer.optimize(allHolds, (progress) => {
+        if (callback) {
+          callback(
+            (progress + this.configs.simulatedAnnealingIteration * i) /
+            (this.configs.optimizeIteration * this.configs.simulatedAnnealingIteration)
+          )
+        }
+      })
       const e2 = this.evaluateOrders(game, c)
 
       if (e2 > e) {
@@ -285,7 +292,7 @@ export abstract class PlayerBase<Power> {
     return new Set(arr)
   }
 
-  private nextRetreatOrders (game: Game<Power>): Set<Order<Power>> {
+  private nextRetreatOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     const units =
       Array.from(game.board.unitStatuses).filter(x => x[0].power === this.power)
     let orders = new Set(units.map(u => new Orders.Disband(u[0])))
@@ -328,18 +335,22 @@ export abstract class PlayerBase<Power> {
         })
       }
     }
+    if (callback) callback(0)
     dfs(0, new Set())
+    if (callback) callback(1)
 
     return orders
   }
 
-  private nextBuildOrder (game: Game<Power>): Set<Order<Power>> {
+  private nextBuildOrder (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     // TODO
     const n = Utils.numberOfBuildableUnits(game.board).get(this.power)
 
     if (n === undefined) {
       return new Set()
     }
+
+    if (callback) callback(0)
 
     if (n > 0) {
       let orders = new Set()
