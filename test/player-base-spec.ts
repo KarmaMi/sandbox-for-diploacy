@@ -23,7 +23,7 @@ interface PlayerWhiteBox {
 
 describe("A player-base", () => {
   describe("when the game is movement phase", () => {
-    it("generates a neighbor orders of the movement phase", () => {
+    it("replaces one order with another order", () => {
       const board = <Board>diplomacy.standard.variant.initialBoard
       const game = new Game([], board)
 

@@ -46,6 +46,18 @@ export interface PlayerBaseConfigs {
 export abstract class PlayerBase<Power> {
   constructor (private configs: PlayerBaseConfigs, private power: Power) {}
 
+  nextOrdersAsync (game: Game<Power>, callback?: (progress: number) => void): Promise<Set<Order<Power>>> {
+    return new Promise((resolve) => {
+      setTimeout(
+        () => {
+          this.nextOrders(game, callback)
+          resolve()
+        },
+        0
+      )
+    })
+  }
+
   nextOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     switch (game.board.state.phase) {
       case Phase.Movement:
