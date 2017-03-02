@@ -1,6 +1,6 @@
 import * as chai from "chai"
-import { PlayerBase } from "./../src/player-base"
 import { Game } from "./../src/game"
+import { PlayerBase } from "./../src/player/player-base"
 import * as diplomacy from "js-diplomacy"
 
 const should = chai.should()

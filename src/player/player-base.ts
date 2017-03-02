@@ -1,6 +1,6 @@
 import * as diplomacy from "js-diplomacy"
-import { Game } from "./game"
-import { SimulatedAnnealing } from "./optimizer"
+import { Game } from "../game"
+import { SimulatedAnnealing } from "../optimizer"
 
 export declare type Unit<Power> = diplomacy.standardRule.Unit<Power>
 export declare type Location<Power> = diplomacy.standardRule.Location<Power>
