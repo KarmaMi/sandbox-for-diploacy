@@ -44,15 +44,12 @@ export interface PlayerBaseConfigs {
 }
 
 export abstract class PlayerBase<Power> {
-  constructor (private configs: PlayerBaseConfigs, private power: Power) {}
+  constructor (private configs: PlayerBaseConfigs, protected power: Power) {}
 
   nextOrdersAsync (game: Game<Power>, callback?: (progress: number) => void): Promise<Set<Order<Power>>> {
     return new Promise((resolve) => {
       setTimeout(
-        () => {
-          this.nextOrders(game, callback)
-          resolve()
-        },
+        () => resolve(this.nextOrders(game, callback)),
         0
       )
     })
@@ -112,11 +109,10 @@ export abstract class PlayerBase<Power> {
     let optimal = allHolds
     let e = eForAllHolds
     for (let i = 0; i < this.configs.optimizeIteration; i++) {
-      const c = optimizer.optimize(allHolds, (progress) => {
+      const c = optimizer.optimize(allHolds, (progress: number) => {
         if (callback) {
           callback(
-            (progress + this.configs.simulatedAnnealingIteration * i) /
-            (this.configs.optimizeIteration * this.configs.simulatedAnnealingIteration)
+            (progress + i) / this.configs.optimizeIteration
           )
         }
       })
@@ -195,6 +191,8 @@ export abstract class PlayerBase<Power> {
       const candidates = new Set()
       // Units of the same power
       original.forEach(order => {
+        if (order === target) return
+
         if (order instanceof diplomacy.standardRule.Order.Move) {
           if (supportable.has(order.destination)) {
             candidates.add(new Orders.Support(unit, order))
@@ -241,6 +239,7 @@ export abstract class PlayerBase<Power> {
 
       // Units of the same power
       original.forEach(order => {
+        if (order === target) return
         if (order instanceof diplomacy.standardRule.Order.Move) {
           if (
             Utils.isMovableViaSea(board.map, order.unit.location.province, unit.location.province, board.units) &&
@@ -285,7 +284,7 @@ export abstract class PlayerBase<Power> {
 
     switch (orderType) {
       case OrderType.Support:
-        if (!replaceByConvoy()) {
+        if (!replaceBySupport()) {
           // If there is no valid support orders, use hold or move
           replaceByMoveOrHold()
         }
@@ -301,6 +300,7 @@ export abstract class PlayerBase<Power> {
         replaceByMoveOrHold()
         break
     }
+
     return new Set(arr)
   }
 
