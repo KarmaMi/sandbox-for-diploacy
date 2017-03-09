@@ -7,6 +7,11 @@ export declare type Location<Power> = diplomacy.standardRule.Location<Power>
 export declare type Board<Power> = diplomacy.standardRule.Board<Power>
 export declare type Order<Power> = diplomacy.standardRule.Order.Order<Power>
 
+const ALPHA = 0.9
+const OPTIMIZE_ITERATION = 1
+
+const CANDIDATES_PER_UNIT = 5
+
 const Utils = diplomacy.standardRule.Utils
 const MilitaryBranch = diplomacy.standardRule.MilitaryBranch
 const Phase = diplomacy.standardRule.Phase
@@ -37,14 +42,8 @@ function combinations<T>(array: Array<T>, k: number): Set<Array<T>> {
   return combinations
 }
 
-export interface PlayerBaseConfigs {
-  simulatedAnnealingIteration: number
-  alpha: number
-  optimizeIteration: number
-}
-
 export abstract class PlayerBase<Power> {
-  constructor (private configs: PlayerBaseConfigs, protected power: Power) {}
+  constructor (protected power: Power) {}
 
   nextOrdersAsync (game: Game<Power>, callback?: (progress: number) => void): Promise<Set<Order<Power>>> {
     return new Promise((resolve) => {
@@ -97,9 +96,10 @@ export abstract class PlayerBase<Power> {
     }
 
     /* Instanciate simulated annealing */
+    const numOfUnits = Array.from(game.board.units).filter(u => u.power === this.power).length
     const optimizer = new SimulatedAnnealing({
-      iteration: this.configs.simulatedAnnealingIteration,
-      alpha: this.configs.alpha,
+      iteration: Math.pow(CANDIDATES_PER_UNIT, numOfUnits),
+      alpha: ALPHA,
       initialTemprature: initialTemprature,
       randomNeighbor: orders => this.randomNeighbor(game.board, orders),
       evaluate: (target: Set<Order<Power>>) => -this.evaluateOrders(game, target)
@@ -108,11 +108,11 @@ export abstract class PlayerBase<Power> {
     // Optimize
     let optimal = allHolds
     let e = eForAllHolds
-    for (let i = 0; i < this.configs.optimizeIteration; i++) {
+    for (let i = 0; i < OPTIMIZE_ITERATION; i++) {
       const c = optimizer.optimize(allHolds, (progress: number) => {
         if (callback) {
           callback(
-            (progress + i) / this.configs.optimizeIteration
+            (progress + i) / OPTIMIZE_ITERATION
           )
         }
       })

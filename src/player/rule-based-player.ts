@@ -1,6 +1,6 @@
 import * as diplomacy from "js-diplomacy"
 import { Game } from "../game"
-import { PlayerBaseConfigs, PlayerBase } from "./player-base"
+import { PlayerBase } from "./player-base"
 import I from "./province-importance"
 
 declare type Board<Power> = diplomacy.standardRule.Board<Power>
@@ -16,7 +16,7 @@ export class EstimationTarget<Power> {
   ) {}
 }
 
-export interface RuleBasedPlayerConfigs<Power> extends PlayerBaseConfigs {
+export interface RuleBasedPlayerConfigs<Power> {
   importanceIteration: number
   map: diplomacy.standardRule.DiplomacyMap<Power>
 }
@@ -24,8 +24,8 @@ export interface RuleBasedPlayerConfigs<Power> extends PlayerBaseConfigs {
 export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
   importance: Map<diplomacy.board.Province<Power>, number>
   rule: diplomacy.standardRule.Rule<Power>
-  constructor (configs: RuleBasedPlayerConfigs<Power>, power: Power) {
-    super(configs, power)
+  constructor (private configs: RuleBasedPlayerConfigs<Power>, power: Power) {
+    super(power)
     this.importance = I(configs.importanceIteration, configs.map)
     this.rule = new diplomacy.standardRule.Rule<Power>()
   }
