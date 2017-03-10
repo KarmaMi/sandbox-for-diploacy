@@ -57,3 +57,4 @@ gulp.task('browserify', () => {
   .pipe(sourcemaps.write('./'))
   .pipe(gulp.dest('docs/'))
 })
+gulp.task('watch-browserify', () => gulp.watch(['./index.js', 'src/**/*.ts', 'src/**/*.tsx'], ['browserify']))
