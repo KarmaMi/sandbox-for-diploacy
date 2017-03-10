@@ -379,8 +379,8 @@ export abstract class PlayerBase<Power> {
       for (let i = 1; i <= n; i++) {
         const cs = combinations(homes, i)
 
-        function search (locations: Array<Location<Power>>) {
-          function dfs(index: number, orders: Set<Order<Power>>) {
+        const search = (locations: Array<Location<Power>>) => {
+          const dfs = (index: number, orders: Set<Order<Power>>) => {
             const l = locations[index]
             if (index === locations.length - 1) {
               l.militaryBranches.forEach(m => {
