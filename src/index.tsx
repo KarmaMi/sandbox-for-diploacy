@@ -9,6 +9,7 @@ import { MenuView } from "./frontend/menu-view"
 import { MkPlayer } from "./frontend/player-selector"
 import { PlayerDialog } from "./frontend/player-dialog"
 import { PlayerPanel } from "./frontend/player-panel"
+import { ResultPanel } from "./frontend/result-panel"
 import { HumanPlayerView } from "./frontend/human-player-view"
 
 import { PlayerBase } from "./player/player-base"
@@ -18,7 +19,7 @@ import { RuleBasedPlayer } from "./player/rule-based-player"
 
 const configs = {
   importanceIteration: 2,
-  map: diplomacy.standard.variant.initialBoard.map
+  map: diplomacy.standard.variant.initialBoard.map,
 }
 
 const players: Array<MkPlayer> = [
@@ -31,12 +32,13 @@ const players: Array<MkPlayer> = [
 interface State {
   game: Game<diplomacy.standardMap.Power> | null
   players: Map<diplomacy.standardMap.Power, PlayerBase<diplomacy.standardMap.Power>> | null
+  result: Set<diplomacy.rule.OrderResult<diplomacy.standardMap.Power, diplomacy.standardRule.MilitaryBranch, diplomacy.standardRule.Result>>
 }
 
 class Sandbox extends React.Component<{}, State> {
   constructor (props: {}) {
     super(props)
-    this.state = { game: null, players: null }
+    this.state = { game: null, players: null, result: new Set() }
   }
 
   render () {
@@ -44,7 +46,9 @@ class Sandbox extends React.Component<{}, State> {
       ? [
         <HumanPlayerView key="map" board={this.state.game.board}/>,
         <div key="info" className="row">
-          <div className="col-md-8 result"></div>
+          <div className="col-md-8">
+            <ResultPanel result={this.state.result} />
+          </div>
           <div className="col-md-4">
             <PlayerPanel
               ref={(playerPanel) => this.playerPanel = playerPanel}
@@ -80,7 +84,8 @@ class Sandbox extends React.Component<{}, State> {
                   })
                   this.setState({
                     game: new Game(x, result.result.board),
-                    players: this.state.players
+                    players: this.state.players,
+                    result: result.result.results
                   })
                 }
               }
