@@ -310,14 +310,14 @@ export abstract class PlayerBase<Power> {
     let orders = new Set(units.map(u => new Orders.Disband(u[0])))
     let e = this.evaluateOrders(game, orders)
     // Check all candidates
-    function dfs (index: number, orders: Set<Order<Power>>) {
+    function dfs (index: number, os: Set<Order<Power>>) {
       const [unit, status] = units[index]
 
       if (index === units.length - 1) {
         // Disband
-        const c1 = new Set(Array.from(orders))
+        const c1 = new Set(Array.from(os))
         c1.add(new Orders.Disband(unit))
-        const e1 = this.evaluateOrders(game, orders)
+        const e1 = this.evaluateOrders(game, c1)
         if (e1 > e) {
           orders = c1
           e = e1
@@ -325,9 +325,9 @@ export abstract class PlayerBase<Power> {
 
         // Retreat
         Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
-          const c1 = new Set(Array.from(orders))
+          const c1 = new Set(Array.from(os))
           c1.add(new Orders.Retreat(unit, location))
-          const e1 = this.evaluateOrders(game, orders)
+          const e1 = this.evaluateOrders(game, c1)
           if (e1 > e) {
             orders = c1
             e = e1
@@ -335,13 +335,13 @@ export abstract class PlayerBase<Power> {
         })
       } else {
         // Disband
-        const c1 = new Set(Array.from(orders))
+        const c1 = new Set(Array.from(os))
         c1.add(new Orders.Disband(unit))
         dfs(index + 1, c1)
 
         // Retreat
         Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
-          const c1 = new Set(Array.from(orders))
+          const c1 = new Set(Array.from(os))
           c1.add(new Orders.Retreat(unit, location))
           dfs(index + 1, c1)
         })
@@ -371,7 +371,7 @@ export abstract class PlayerBase<Power> {
       const homes =
         Array.from(game.board.map.locations).filter(l => {
           const status = game.board.provinceStatuses.get(l.province)
-          return (l.province.homeOf === this.power) &&
+          return (l.province.homeOf === this.power) && l.province.isSupplyCenter &&
             (Array.from(game.board.units).every(u => u.location !== l)) &&
             (status && status.occupied === this.power)
         })
@@ -380,22 +380,22 @@ export abstract class PlayerBase<Power> {
         const cs = combinations(homes, i)
 
         const search = (locations: Array<Location<Power>>) => {
-          const dfs = (index: number, orders: Set<Order<Power>>) => {
+          const dfs = (index: number, os: Set<Order<Power>>) => {
             const l = locations[index]
             if (index === locations.length - 1) {
               l.militaryBranches.forEach(m => {
-                const c1 = new Set(Array.from(orders))
+                const c1 = new Set(Array.from(os))
                 c1.add(new Orders.Build<Power>(new diplomacy.standardRule.Unit(m, l, this.power)))
 
                 const e1 = this.evaluateOrders(game, c1)
                 if (e1 > e) {
-                  orders = c1
+                  orders = new Set(Array.from(c1))
                   e = e1
                 }
               })
             } else {
               l.militaryBranches.forEach(m => {
-                const c = new Set(Array.from(orders))
+                const c = new Set(Array.from(os))
                 c.add(new Orders.Build<Power>(new diplomacy.standardRule.Unit(m, l, this.power)))
                 dfs(index + 1, c)
               })

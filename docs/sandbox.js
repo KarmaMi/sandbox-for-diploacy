@@ -24166,22 +24166,22 @@ class PlayerBase {
         let orders = new Set(units.map(u => new Orders.Disband(u[0])));
         let e = this.evaluateOrders(game, orders);
         // Check all candidates
-        function dfs(index, orders) {
+        function dfs(index, os) {
             const [unit, status] = units[index];
             if (index === units.length - 1) {
                 // Disband
-                const c1 = new Set(Array.from(orders));
+                const c1 = new Set(Array.from(os));
                 c1.add(new Orders.Disband(unit));
-                const e1 = this.evaluateOrders(game, orders);
+                const e1 = this.evaluateOrders(game, c1);
                 if (e1 > e) {
                     orders = c1;
                     e = e1;
                 }
                 // Retreat
                 Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
-                    const c1 = new Set(Array.from(orders));
+                    const c1 = new Set(Array.from(os));
                     c1.add(new Orders.Retreat(unit, location));
-                    const e1 = this.evaluateOrders(game, orders);
+                    const e1 = this.evaluateOrders(game, c1);
                     if (e1 > e) {
                         orders = c1;
                         e = e1;
@@ -24190,12 +24190,12 @@ class PlayerBase {
             }
             else {
                 // Disband
-                const c1 = new Set(Array.from(orders));
+                const c1 = new Set(Array.from(os));
                 c1.add(new Orders.Disband(unit));
                 dfs(index + 1, c1);
                 // Retreat
                 Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
-                    const c1 = new Set(Array.from(orders));
+                    const c1 = new Set(Array.from(os));
                     c1.add(new Orders.Retreat(unit, location));
                     dfs(index + 1, c1);
                 });
@@ -24219,31 +24219,36 @@ class PlayerBase {
         if (n > 0) {
             let orders = new Set();
             let e = this.evaluateOrders(game, orders);
+            console.log(orders.size);
+            console.log(e);
             const homes = Array.from(game.board.map.locations).filter(l => {
                 const status = game.board.provinceStatuses.get(l.province);
-                return (l.province.homeOf === this.power) &&
+                return (l.province.homeOf === this.power) && l.province.isSupplyCenter &&
                     (Array.from(game.board.units).every(u => u.location !== l)) &&
                     (status && status.occupied === this.power);
             });
             for (let i = 1; i <= n; i++) {
                 const cs = combinations(homes, i);
+                console.log(cs.size);
                 const search = (locations) => {
-                    const dfs = (index, orders) => {
+                    const dfs = (index, os) => {
                         const l = locations[index];
                         if (index === locations.length - 1) {
+                            console.log("update");
                             l.militaryBranches.forEach(m => {
-                                const c1 = new Set(Array.from(orders));
+                                const c1 = new Set(Array.from(os));
                                 c1.add(new Orders.Build(new diplomacy.standardRule.Unit(m, l, this.power)));
                                 const e1 = this.evaluateOrders(game, c1);
+                                console.log(Array.from(c1).map(o => o.toString()));
                                 if (e1 > e) {
-                                    orders = c1;
+                                    orders = new Set(Array.from(c1));
                                     e = e1;
                                 }
                             });
                         }
                         else {
                             l.militaryBranches.forEach(m => {
-                                const c = new Set(Array.from(orders));
+                                const c = new Set(Array.from(os));
                                 c.add(new Orders.Build(new diplomacy.standardRule.Unit(m, l, this.power)));
                                 dfs(index + 1, c);
                             });
@@ -24252,6 +24257,7 @@ class PlayerBase {
                     dfs(0, new Set());
                 };
                 cs.forEach(candidate => {
+                    console.log(candidate.map(x => x.toString()));
                     const ps = new Set(candidate.map(x => x.province));
                     if (ps.size !== candidate.length) {
                         return;
@@ -24259,6 +24265,8 @@ class PlayerBase {
                     search(candidate);
                 });
             }
+            console.log(orders.size);
+            console.log(e);
             return orders;
         }
         else if (n < 0) {
@@ -24354,6 +24362,37 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
         this.rule = new diplomacy.standardRule.Rule();
     }
     evaluateOrders(game, orders) {
+        if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
+            let value = 0;
+            orders.forEach(order => {
+                if (order instanceof Orders.Retreat) {
+                    value += this.importance.get(order.destination.province) || 0;
+                }
+                else {
+                    value -= this.importance.get(order.unit.location.province) || 0;
+                }
+            });
+            return value;
+        }
+        if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
+            let value = 0;
+            orders.forEach(order => {
+                if (order instanceof Orders.Build) {
+                    const o = order;
+                    const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch));
+                    const ps = new Set(xs.map(x => x.province));
+                    value += this.importance.get(o.unit.location.province) || 0;
+                    ps.forEach(p => {
+                        value += this.importance.get(p) || 0;
+                    });
+                }
+                else {
+                    const o = order;
+                    value -= this.importance.get(o.unit.location.province) || 0;
+                }
+            });
+            return value;
+        }
         const os = Array.from(orders);
         const supports = os.filter(x => x instanceof Orders.Support);
         const convoys = os.filter(x => x instanceof Orders.Convoy);

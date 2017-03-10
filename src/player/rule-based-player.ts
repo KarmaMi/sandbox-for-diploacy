@@ -31,6 +31,37 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
   }
 
   evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>) {
+    if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
+      let value = 0
+      orders.forEach(order => {
+        if (order instanceof Orders.Retreat) {
+          value += this.importance.get(order.destination.province) || 0
+        } else {
+          value -= this.importance.get(order.unit.location.province) || 0
+        }
+      })
+      return value
+    }
+
+    if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
+      let value = 0
+      orders.forEach(order => {
+        if (order instanceof Orders.Build) {
+          const o: diplomacy.standardRule.Order.Order<Power> = order
+          const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch))
+          const ps = new Set(xs.map(x => x.province))
+          value += this.importance.get(o.unit.location.province) || 0
+          ps.forEach(p => {
+            value += this.importance.get(p) || 0
+          })
+        } else {
+          const o: diplomacy.standardRule.Order.Order<Power> = order
+          value -= this.importance.get(o.unit.location.province) || 0
+        }
+      })
+      return value
+    }
+
     const os = Array.from(orders)
     const supports = os.filter(x => x instanceof Orders.Support)
     const convoys = os.filter(x => x instanceof Orders.Convoy)
