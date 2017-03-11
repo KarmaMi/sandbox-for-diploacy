@@ -30,102 +30,9 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
     this.rule = new diplomacy.standardRule.Rule<Power>()
   }
 
-  evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>) {
-    if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
-      let value = 0
-      orders.forEach(order => {
-        if (order instanceof Orders.Retreat) {
-          value += this.importance.get(order.destination.province) || 0
-        } else {
-          value -= this.importance.get(order.unit.location.province) || 0
-        }
-      })
-      return value
-    }
-
-    if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
-      let value = 0
-      orders.forEach(order => {
-        if (order instanceof Orders.Build) {
-          const o: diplomacy.standardRule.Order.Order<Power> = order
-          const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch))
-          const ps = new Set(xs.map(x => x.province))
-          value += this.importance.get(o.unit.location.province) || 0
-          ps.forEach(p => {
-            value += this.importance.get(p) || 0
-          })
-        } else {
-          const o: diplomacy.standardRule.Order.Order<Power> = order
-          value -= this.importance.get(o.unit.location.province) || 0
-        }
-      })
-      return value
-    }
-
-    const os = Array.from(orders)
-    const supports = os.filter(x => x instanceof Orders.Support)
-    const convoys = os.filter(x => x instanceof Orders.Convoy)
-
-    const estimation: Array<[EstimationTarget<Power>, number]> = []
-
-    // Check move orders
-    orders.forEach(order => {
-      if (order instanceof Orders.Move) {
-        if (!game.board.map.movableLocationsOf(order.unit.location, order.unit.militaryBranch)
-          .has(order.destination)) {
-          // Via convoy
-          const units = convoys.filter((convoy: diplomacy.standardRule.Order.Convoy<Power>) => {
-            return (convoy.target.unit === order.unit) && (convoy.target.destination === order.destination)
-          }).map(o => o.unit)
-          if (!Utils.isMovableViaSea(
-            game.board.map, order.unit.location.province, order.destination.province, new Set(units)
-          )) {
-            // The move order will fail
-            return
-          }
-        }
-        // The move order may success
-        estimation.push([
-          new EstimationTarget(this.power, order.destination.province, order.unit.location.province),
-          1
-        ])
-      } else {
-        estimation.push([
-          new EstimationTarget(this.power, order.unit.location.province, order.unit.location.province),
-          1
-        ])
-      }
-    })
-
-    supports.forEach((support: diplomacy.standardRule.Order.Support<Power>) => {
-      if (support.target.unit.power === this.power) {
-        const elem =
-          estimation.find(elem => {
-            return (elem[0].power === support.target.unit.power) &&
-              (elem[0].target === support.destination.province) &&
-              (elem[0].from === support.target.unit.location.province)
-          })
-        if (elem) {
-          elem[1] += 1
-        }
-      } else {
-        const elem =
-          estimation.find(elem => {
-            return (elem[0].power === support.target.unit.power) &&
-              (elem[0].target === support.destination.province)
-          })
-        if (elem) {
-          elem[1] += 1
-        } else {
-          estimation.push([
-            new EstimationTarget(support.target.unit.power, support.destination.province, null),
-            1
-          ])
-        }
-      }
-    })
-
-    // Units of other powers
+  protected mkEvaluateOrders (game: Game<Power>): (orders: Set<Order<Power>>) => number {
+    // Precompute (Units of other powers)
+    const preEstimation: Array<[EstimationTarget<Power>, number]> = []
     game.board.units.forEach(unit => {
       if (unit.power === this.power) {
         return
@@ -135,16 +42,15 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       ls.push(unit.location)
 
       const ps = new Set(ls.map(l => l.province))
-
       ps.forEach(province => {
         const elem =
-          estimation.find(elem => {
+          preEstimation.find(elem => {
             return (elem[0].power === unit.power) && (elem[0].target === province)
           })
         if (elem) {
           elem[1] += 1
         } else {
-          estimation.push([
+          preEstimation.push([
             new EstimationTarget(unit.power, province, null),
             1
           ])
@@ -152,31 +58,127 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       })
     })
 
-    // evalute orders
-    let value = 0
-    game.board.map.provinces.forEach(province => {
-      const elems = estimation.filter(elem => elem[0].target === province)
-      const maxValue = Math.max(...(elems.map(x => x[1])))
-
-      const maxElems = elems.filter(x => x[1] === maxValue)
-
-      const status = game.board.provinceStatuses.get(province)
-      if (maxElems.length == 0 && status && status.occupied === this.power) {
-        value += this.importance.get(province) || 0
-        return
+    return (orders: Set<Order<Power>>) => {
+      if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
+        let value = 0
+        orders.forEach(order => {
+          if (order instanceof Orders.Retreat) {
+            value += this.importance.get(order.destination.province) || 0
+          } else {
+            value -= this.importance.get(order.unit.location.province) || 0
+          }
+        })
+        return value
       }
 
-      if (maxElems.length != 1) {
-        return
+      if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
+        let value = 0
+        orders.forEach(order => {
+          if (order instanceof Orders.Build) {
+            const o: diplomacy.standardRule.Order.Order<Power> = order
+            const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch))
+            const ps = new Set(xs.map(x => x.province))
+            value += this.importance.get(o.unit.location.province) || 0
+            ps.forEach(p => {
+              value += this.importance.get(p) || 0
+            })
+          } else {
+            const o: diplomacy.standardRule.Order.Order<Power> = order
+            value -= this.importance.get(o.unit.location.province) || 0
+          }
+        })
+        return value
       }
 
-      if (maxElems.find(x => x[0].power === this.power)) {
-        value += this.importance.get(province) || 0
-      } else {
-        value += -(this.importance.get(province) || 0)
-      }
-    })
+      const os = Array.from(orders)
+      const supports = os.filter(x => x instanceof Orders.Support)
+      const convoys = os.filter(x => x instanceof Orders.Convoy)
 
-    return value
+      const estimation: Array<[EstimationTarget<Power>, number]> = [...preEstimation]
+
+      // Check move orders
+      orders.forEach(order => {
+        if (order instanceof Orders.Move) {
+          if (!game.board.map.movableLocationsOf(order.unit.location, order.unit.militaryBranch)
+            .has(order.destination)) {
+            // Via convoy
+            const units = convoys.filter((convoy: diplomacy.standardRule.Order.Convoy<Power>) => {
+              return (convoy.target.unit === order.unit) && (convoy.target.destination === order.destination)
+            }).map(o => o.unit)
+            if (!Utils.isMovableViaSea(
+              game.board.map, order.unit.location.province, order.destination.province, new Set(units)
+            )) {
+              // The move order will fail
+              return
+            }
+          }
+          // The move order may success
+          estimation.push([
+            new EstimationTarget(this.power, order.destination.province, order.unit.location.province),
+            1
+          ])
+        } else {
+          estimation.push([
+            new EstimationTarget(this.power, order.unit.location.province, order.unit.location.province),
+            1
+          ])
+        }
+      })
+
+      supports.forEach((support: diplomacy.standardRule.Order.Support<Power>) => {
+        if (support.target.unit.power === this.power) {
+          const elem =
+            estimation.find(elem => {
+              return (elem[0].power === support.target.unit.power) &&
+                (elem[0].target === support.destination.province) &&
+                (elem[0].from === support.target.unit.location.province)
+            })
+          if (elem) {
+            elem[1] += 1
+          }
+        } else {
+          const elem =
+            estimation.find(elem => {
+              return (elem[0].power === support.target.unit.power) &&
+                (elem[0].target === support.destination.province)
+            })
+          if (elem) {
+            elem[1] += 1
+          } else {
+            estimation.push([
+              new EstimationTarget(support.target.unit.power, support.destination.province, null),
+              1
+            ])
+          }
+        }
+      })
+
+      // evalute orders
+      let value = 0
+      game.board.map.provinces.forEach(province => {
+        const elems = estimation.filter(elem => elem[0].target === province)
+        const maxValue = Math.max(...(elems.map(x => x[1])))
+
+        const maxElems = elems.filter(x => x[1] === maxValue)
+
+        const status = game.board.provinceStatuses.get(province)
+        if (maxElems.length == 0 && status && status.occupied === this.power) {
+          value += this.importance.get(province) || 0
+          return
+        }
+
+        if (maxElems.length != 1) {
+          return
+        }
+
+        if (maxElems.find(x => x[0].power === this.power)) {
+          value += this.importance.get(province) || 0
+        } else {
+          value += -(this.importance.get(province) || 0)
+        }
+      })
+
+      return value
+    }
   }
 }

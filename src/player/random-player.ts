@@ -8,7 +8,7 @@ export declare type Order<Power> = diplomacy.standardRule.Order.Order<Power>
 const Orders = diplomacy.standardRule.Order
 
 export class RandomPlayer<Power> extends PlayerBase<Power> {
-  protected evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>): number {
-    return Math.random()
+  protected mkEvaluateOrders (game: Game<Power>): (orders: Set<Order<Power>>) => number {
+    return (orders: Set<Order<Power>>) => Math.random()
   }
 }

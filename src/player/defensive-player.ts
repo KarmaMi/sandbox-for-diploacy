@@ -21,23 +21,25 @@ export class DefensivePlayer<Power> extends PlayerBase<Power> {
     this.importance = I(configs.importanceIteration, configs.map)
     this.rule = new diplomacy.standardRule.Rule<Power>()
   }
-  protected evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>): number {
-    let value = 0
-    orders.forEach(order => {
-      if (order instanceof Orders.Support) {
-        value += this.importance.get(order.unit.location.province) || 0
-        if (order.target.tpe === Orders.OrderType.Hold) {
-          const t = Array.from(orders).find(o => o.unit === order.target.unit)
-          if (t && t.tpe !== Orders.OrderType.Move) {
-            value += this.importance.get(order.destination.province) || 0
+  protected mkEvaluateOrders (game: Game<Power>): (orders: Set<Order<Power>>) => number {
+    return (orders: Set<Order<Power>>) => {
+      let value = 0
+      orders.forEach(order => {
+        if (order instanceof Orders.Support) {
+          value += this.importance.get(order.unit.location.province) || 0
+          if (order.target.tpe === Orders.OrderType.Hold) {
+            const t = Array.from(orders).find(o => o.unit === order.target.unit)
+            if (t && t.tpe !== Orders.OrderType.Move) {
+              value += this.importance.get(order.destination.province) || 0
+            }
           }
+        } else if (order instanceof Orders.Move) {
+          value += this.importance.get(order.destination.province) || 0
+        } else {
+          value += this.importance.get(order.unit.location.province) || 0
         }
-      } else if (order instanceof Orders.Move) {
-        value += this.importance.get(order.destination.province) || 0
-      } else {
-        value += this.importance.get(order.unit.location.province) || 0
-      }
-    })
-    return value
+      })
+      return value
+    }
   }
 }

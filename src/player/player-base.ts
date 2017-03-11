@@ -65,10 +65,11 @@ export abstract class PlayerBase<Power> {
     }
   }
 
-  protected abstract evaluateOrders (game: Game<Power>, orders: Set<Order<Power>>): number
+  protected abstract mkEvaluateOrders (game: Game<Power>): (orders: Set<Order<Power>>) => number
 
   private nextMovementOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     const $$ = new diplomacy.standardRule.Helper(game.board)
+    const E = this.mkEvaluateOrders(game)
 
     // orders that all units hold
     const allHolds = new Set(
@@ -76,7 +77,7 @@ export abstract class PlayerBase<Power> {
         .filter(unit => unit.power === this.power)
         .map(unit => new Orders.Hold(unit))
       )
-    const eForAllHolds = this.evaluateOrders(game, allHolds)
+    const eForAllHolds = E(allHolds)
 
     // Initialize simulated annealing
     /* Decide initial temprature */
@@ -85,7 +86,7 @@ export abstract class PlayerBase<Power> {
     for (let i = 0; i < 10; i++) {
       const n = this.randomNeighbor(game.board, allHolds)
       if (n) {
-        diffSum = Math.abs(eForAllHolds - this.evaluateOrders(game, n))
+        diffSum = Math.abs(eForAllHolds - E(n))
         num += 1
       }
     }
@@ -102,7 +103,7 @@ export abstract class PlayerBase<Power> {
       alpha: ALPHA,
       initialTemprature: initialTemprature,
       randomNeighbor: orders => this.randomNeighbor(game.board, orders),
-      evaluate: (target: Set<Order<Power>>) => -this.evaluateOrders(game, target)
+      evaluate: (target: Set<Order<Power>>) => -E(target)
     })
 
     // Optimize
@@ -116,7 +117,7 @@ export abstract class PlayerBase<Power> {
           )
         }
       })
-      const e2 = this.evaluateOrders(game, c)
+      const e2 = E(c)
 
       if (e2 > e) {
         optimal = c
@@ -305,10 +306,11 @@ export abstract class PlayerBase<Power> {
   }
 
   private nextRetreatOrders (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
+    const E = this.mkEvaluateOrders(game)
     const units =
       Array.from(game.board.unitStatuses).filter(x => x[0].power === this.power)
     let orders = new Set(units.map(u => new Orders.Disband(u[0])))
-    let e = this.evaluateOrders(game, orders)
+    let e = E(orders)
     // Check all candidates
     function dfs (index: number, os: Set<Order<Power>>) {
       const [unit, status] = units[index]
@@ -357,6 +359,7 @@ export abstract class PlayerBase<Power> {
   private nextBuildOrder (game: Game<Power>, callback?: (progress: number) => void): Set<Order<Power>> {
     // TODO
     const n = Utils.numberOfBuildableUnits(game.board).get(this.power)
+    const E = this.mkEvaluateOrders(game)
 
     if (n === undefined) {
       return new Set()
@@ -366,7 +369,7 @@ export abstract class PlayerBase<Power> {
 
     if (n > 0) {
       let orders = new Set()
-      let e = this.evaluateOrders(game, orders)
+      let e = E(orders)
 
       const homes =
         Array.from(game.board.map.locations).filter(l => {
@@ -387,7 +390,7 @@ export abstract class PlayerBase<Power> {
                 const c1 = new Set(Array.from(os))
                 c1.add(new Orders.Build<Power>(new diplomacy.standardRule.Unit(m, l, this.power)))
 
-                const e1 = this.evaluateOrders(game, c1)
+                const e1 = E(c1)
                 if (e1 > e) {
                   orders = new Set(Array.from(c1))
                   e = e1
@@ -424,7 +427,7 @@ export abstract class PlayerBase<Power> {
 
       cs.forEach(candidate => {
         const c1 = new Set(candidate.map(u => new Orders.Disband(u)))
-        const e1 = this.evaluateOrders(game, c1)
+        const e1 = E(c1)
 
         if (orders && e) {
           if (e1 > e) {
