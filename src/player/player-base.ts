@@ -349,7 +349,7 @@ export abstract class PlayerBase<Power> {
         // Disband
         const c1 = new Set(Array.from(os))
         c1.add(new Orders.Disband(unit))
-        const e1 = this.evaluateOrders(game, c1)
+        const e1 = E(c1)
         if (e1 > e) {
           orders = c1
           e = e1
@@ -359,7 +359,7 @@ export abstract class PlayerBase<Power> {
         Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
           const c1 = new Set(Array.from(os))
           c1.add(new Orders.Retreat(unit, location))
-          const e1 = this.evaluateOrders(game, c1)
+          const e1 = E(c1)
           if (e1 > e) {
             orders = c1
             e = e1
@@ -380,7 +380,9 @@ export abstract class PlayerBase<Power> {
       }
     }
     if (callback) callback(0)
-    dfs(0, new Set())
+    if (units.length !== 0) {
+      dfs(0, new Set())
+    }
     if (callback) callback(1)
 
     return orders

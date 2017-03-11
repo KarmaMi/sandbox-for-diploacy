@@ -94,7 +94,13 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       const supports = os.filter(x => x instanceof Orders.Support)
       const convoys = os.filter(x => x instanceof Orders.Convoy)
 
-      const estimation: Array<[EstimationTarget<Power>, number]> = [...preEstimation]
+      const estimation: Array<[EstimationTarget<Power>, number]> = []
+      preEstimation.forEach(p => {
+        estimation.push([
+          new EstimationTarget(p[0].power, p[0].target, p[0].from),
+          p[1]
+        ])
+      })
 
       // Check move orders
       orders.forEach(order => {
@@ -174,7 +180,7 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
         if (maxElems.find(x => x[0].power === this.power)) {
           value += this.importance.get(province) || 0
         } else {
-          value += -(this.importance.get(province) || 0)
+          value -= this.importance.get(province) || 0
         }
       })
 

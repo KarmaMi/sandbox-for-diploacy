@@ -110,11 +110,7 @@ var board;
          */
         constructor(map) {
             this.map = map;
-            this.locations = new Set();
-            this.map.edges.forEach(elem => {
-                this.locations.add(elem.n0);
-                this.locations.add(elem.n1);
-            });
+            this.locations = this.map.nodes;
             this.provinces = new Set();
             this.provinceToLocation = new Map();
             this.locations.forEach(elem => {
@@ -235,22 +231,20 @@ var graph;
             else {
                 this.nodes = new Set([...nodes]);
             }
+            this.neighborLists = new Map();
+            this.nodes.forEach(node => {
+                const xs1 = Array.from(this.edges).filter(edge => edge.n0 === node).map(edge => [edge.n1, edge.label]);
+                const xs2 = Array.from(this.edges).filter(edge => edge.n1 === node).map(edge => [edge.n0, edge.label]);
+                const xs = xs1.concat(xs2);
+                this.neighborLists.set(node, new Set(xs));
+            });
         }
         /**
          * @param node - The target node
          * @return he set of nodes that are neighbors of the node.
          */
         neighborsOf(node) {
-            const ns = new Set();
-            this.edges.forEach(edge => {
-                if (edge.n0 === node) {
-                    ns.add([edge.n1, edge.label]);
-                }
-                else if (edge.n1 === node) {
-                    ns.add([edge.n0, edge.label]);
-                }
-            });
-            return ns;
+            return this.neighborLists.get(node) || new Set();
         }
     }
     graph.LabeledUndirectedGraph = LabeledUndirectedGraph;
@@ -274,6 +268,18 @@ var graph;
             else {
                 this.nodes = new Set([...nodes]);
             }
+            this.neighborLists = new Map();
+            this.nodes.forEach(node => {
+                const os = Array.from(this.edges).filter(edge => edge.n0 === node).map(edge => edge.n1);
+                const is = Array.from(this.edges).filter(edge => edge.n1 === node).map(edge => edge.n0);
+                this.neighborLists.set(node, [new Set(os), new Set(is)]);
+            });
+        }
+        outgoingNodesOf(node) {
+            return (this.neighborLists.get(node) || [new Set(), new Set()])[0];
+        }
+        incomingNodesOf(node) {
+            return (this.neighborLists.get(node) || [new Set(), new Set()])[1];
         }
         /**
          * @return The cycle that is contained this graph. If there are no cycles, returns null.
@@ -282,8 +288,7 @@ var graph;
             const visit = (node, path, state) => {
                 state.set(node, true);
                 let cycle = null;
-                for (let edge of [...this.edges].filter(edge => edge.n0 === node)) {
-                    const v = edge.n1;
+                for (let v of this.outgoingNodesOf(node)) {
                     if (!state.get(v)) {
                         const p = [...path];
                         p.push(v);
@@ -1803,9 +1808,7 @@ class MovementResolver {
         let graph = new order_dependency_1.OrderDependency(ordersWithResult).graph;
         // 4. Resolve orders following dependency
         while (graph.nodes.size > 0) {
-            const target = [...graph.nodes].find(node => {
-                return [...graph.edges].every(elem => elem.n1 !== node);
-            });
+            const target = [...graph.nodes].find(node => graph.incomingNodesOf(node).size === 0);
             if (!target) {
                 throw "Internal Error";
             }
@@ -23828,6 +23831,7 @@ class SimulatedAnnealing {
     optimize(seed, callback) {
         let state = seed;
         let e = this.config.evaluate(state);
+        console.log("start:" + e);
         let bestState = state;
         let bestE = e;
         let temprature = this.config.initialTemprature;
@@ -23850,6 +23854,7 @@ class SimulatedAnnealing {
             }
             temprature *= this.config.alpha;
         }
+        console.log("end:" + bestE);
         return bestState;
     }
     probability(e1, e2, temprature) {
@@ -23877,26 +23882,28 @@ class DefensivePlayer extends player_base_1.PlayerBase {
         this.importance = province_importance_1.default(configs.importanceIteration, configs.map);
         this.rule = new diplomacy.standardRule.Rule();
     }
-    evaluateOrders(game, orders) {
-        let value = 0;
-        orders.forEach(order => {
-            if (order instanceof Orders.Support) {
-                value += this.importance.get(order.unit.location.province) || 0;
-                if (order.target.tpe === Orders.OrderType.Hold) {
-                    const t = Array.from(orders).find(o => o.unit === order.target.unit);
-                    if (t && t.tpe !== Orders.OrderType.Move) {
-                        value += this.importance.get(order.destination.province) || 0;
+    mkEvaluateOrders(game) {
+        return (orders) => {
+            let value = 0;
+            orders.forEach(order => {
+                if (order instanceof Orders.Support) {
+                    value += this.importance.get(order.unit.location.province) || 0;
+                    if (order.target.tpe === Orders.OrderType.Hold) {
+                        const t = Array.from(orders).find(o => o.unit === order.target.unit);
+                        if (t && t.tpe !== Orders.OrderType.Move) {
+                            value += this.importance.get(order.destination.province) || 0;
+                        }
                     }
                 }
-            }
-            else if (order instanceof Orders.Move) {
-                value += this.importance.get(order.destination.province) || 0;
-            }
-            else {
-                value += this.importance.get(order.unit.location.province) || 0;
-            }
-        });
-        return value;
+                else if (order instanceof Orders.Move) {
+                    value += this.importance.get(order.destination.province) || 0;
+                }
+                else {
+                    value += this.importance.get(order.unit.location.province) || 0;
+                }
+            });
+            return value;
+        };
     }
 }
 exports.DefensivePlayer = DefensivePlayer;
@@ -23908,7 +23915,7 @@ const diplomacy = require("js-diplomacy");
 const optimizer_1 = require("../optimizer");
 const ALPHA = 0.9;
 const OPTIMIZE_ITERATION = 1;
-const CANDIDATES_PER_UNIT = 5;
+const CANDIDATES_PER_UNIT = 5; // TODO -> 7
 const Utils = diplomacy.standardRule.Utils;
 const MilitaryBranch = diplomacy.standardRule.MilitaryBranch;
 const Phase = diplomacy.standardRule.Phase;
@@ -23956,19 +23963,21 @@ class PlayerBase {
     }
     nextMovementOrders(game, callback) {
         const $$ = new diplomacy.standardRule.Helper(game.board);
+        const E = this.mkEvaluateOrders(game);
         // orders that all units hold
         const allHolds = new Set(Array.from(game.board.units)
             .filter(unit => unit.power === this.power)
             .map(unit => new Orders.Hold(unit)));
-        const eForAllHolds = this.evaluateOrders(game, allHolds);
+        const eForAllHolds = E(allHolds);
         // Initialize simulated annealing
+        const randomNeighbor = this.mkRandomNeighbor(game.board);
         /* Decide initial temprature */
         let diffSum = 0;
         let num = 0;
         for (let i = 0; i < 10; i++) {
-            const n = this.randomNeighbor(game.board, allHolds);
+            const n = randomNeighbor(allHolds);
             if (n) {
-                diffSum = Math.abs(eForAllHolds - this.evaluateOrders(game, n));
+                diffSum = Math.abs(eForAllHolds - E(n));
                 num += 1;
             }
         }
@@ -23982,8 +23991,8 @@ class PlayerBase {
             iteration: Math.pow(CANDIDATES_PER_UNIT, numOfUnits),
             alpha: ALPHA,
             initialTemprature: initialTemprature,
-            randomNeighbor: orders => this.randomNeighbor(game.board, orders),
-            evaluate: (target) => -this.evaluateOrders(game, target)
+            randomNeighbor: orders => randomNeighbor(orders),
+            evaluate: (target) => -E(target)
         });
         // Optimize
         let optimal = allHolds;
@@ -23994,7 +24003,7 @@ class PlayerBase {
                     callback((progress + i) / OPTIMIZE_ITERATION);
                 }
             });
-            const e2 = this.evaluateOrders(game, c);
+            const e2 = E(c);
             if (e2 > e) {
                 optimal = c;
                 e = e2;
@@ -24002,169 +24011,194 @@ class PlayerBase {
         }
         return optimal;
     }
-    randomNeighbor(board, original) {
-        const $$ = new diplomacy.standardRule.Helper(board);
-        const origArray = Array.from(original);
-        // decide an unit to be replaced
-        const index = Math.floor(Math.random() * origArray.length);
-        const target = origArray[index];
-        const unit = target.unit;
-        let orderType = OrderType.Hold;
-        if (Utils.canConvoy(board.map, unit)) {
-            // Can convoy
-            switch (Math.floor(Math.random() * 3)) {
-                case 0:
-                    orderType = OrderType.Move; // including Hold
-                    break;
-                case 1:
-                    orderType = OrderType.Support;
-                    break;
-                case 2:
-                    orderType = OrderType.Convoy;
-                    break;
-            }
-        }
-        else {
-            switch (Math.floor(Math.random() * 2)) {
-                case 0:
-                    orderType = OrderType.Move; // including Hold
-                    break;
-                case 1:
-                    orderType = OrderType.Support;
-                    break;
-            }
-        }
-        let arr = origArray;
-        const replaceByMoveOrHold = () => {
-            const candidates = Utils.movableLocationsOf(board, unit);
-            if (!(target instanceof Orders.Hold)) {
-                candidates.add(unit.location);
-            }
-            if (target instanceof Orders.Move) {
-                candidates.delete(target.destination);
-            }
-            const cs = Array.from(candidates);
-            const cIndex = Math.floor(Math.random() * cs.length);
-            const loc = cs[cIndex];
-            if (loc === unit.location) {
-                // Hold
-                arr[index] = new Orders.Hold(unit);
+    mkRandomNeighbor(board) {
+        const memoForMovableLocations = new Map();
+        const memoForSupportable = new Map();
+        const memoForConvoyable = new Map();
+        return (original) => {
+            const $$ = new diplomacy.standardRule.Helper(board);
+            const origArray = Array.from(original);
+            // decide an unit to be replaced
+            const index = Math.floor(Math.random() * origArray.length);
+            const target = origArray[index];
+            const unit = target.unit;
+            let orderType = OrderType.Hold;
+            if (Utils.canConvoy(board.map, unit)) {
+                // Can convoy
+                switch (Math.floor(Math.random() * 3)) {
+                    case 0:
+                        orderType = OrderType.Move; // including Hold
+                        break;
+                    case 1:
+                        orderType = OrderType.Support;
+                        break;
+                    case 2:
+                        orderType = OrderType.Convoy;
+                        break;
+                }
             }
             else {
-                // Move
-                arr[index] = new Orders.Move(unit, loc);
+                switch (Math.floor(Math.random() * 2)) {
+                    case 0:
+                        orderType = OrderType.Move; // including Hold
+                        break;
+                    case 1:
+                        orderType = OrderType.Support;
+                        break;
+                }
             }
-            return true;
-        };
-        const replaceBySupport = () => {
-            const supportable = Utils.supportableLocationsOf(board.map, unit);
-            const candidates = new Set();
-            // Units of the same power
-            original.forEach(order => {
-                if (order === target)
-                    return;
-                if (order instanceof diplomacy.standardRule.Order.Move) {
-                    if (supportable.has(order.destination)) {
-                        candidates.add(new Orders.Support(unit, order));
-                    }
+            let arr = origArray;
+            const replaceByMoveOrHold = () => {
+                const candidates = memoForMovableLocations.get(unit) || Utils.movableLocationsOf(board, unit);
+                if (!memoForMovableLocations.has(unit)) {
+                    memoForMovableLocations.set(unit, candidates);
+                }
+                if (!(target instanceof Orders.Hold)) {
+                    candidates.add(unit.location);
+                }
+                if (target instanceof Orders.Move) {
+                    candidates.delete(target.destination);
+                }
+                const cs = Array.from(candidates);
+                const cIndex = Math.floor(Math.random() * cs.length);
+                const loc = cs[cIndex];
+                if (loc === unit.location) {
+                    // Hold
+                    arr[index] = new Orders.Hold(unit);
                 }
                 else {
-                    if (supportable.has(order.unit.location)) {
-                        candidates.add(new Orders.Support(unit, new Orders.Hold(order.unit)));
-                    }
+                    // Move
+                    arr[index] = new Orders.Move(unit, loc);
                 }
-            });
-            // Units of the other powers
-            board.units.forEach(unit2 => {
-                if (unit2.power === this.power)
-                    return;
-                const ls = Array.from(Utils.movableLocationsOf(board, unit2)).filter(l => supportable.has(l));
-                ls.forEach(l => {
-                    candidates.add(new Orders.Support(unit, new Orders.Move(unit2, l)));
-                });
-                if (supportable.has(unit2.location)) {
-                    candidates.add(new Orders.Support(unit, new Orders.Hold(unit2)));
-                }
-            });
-            let cs = Array.from(candidates);
-            if (target instanceof Orders.Support) {
-                cs = cs.filter(x => {
-                    (x.destination === target.destination) && (x.target.unit === target.target.unit);
-                });
-            }
-            if (cs.length !== 0) {
-                const cIndex = Math.floor(Math.random() * cs.length);
-                arr[index] = cs[cIndex];
                 return true;
-            }
-            else {
-                return false;
-            }
-        };
-        const replaceByConvoy = () => {
-            const candidates = new Set();
-            // Units of the same power
-            original.forEach(order => {
-                if (order === target)
-                    return;
-                if (order instanceof diplomacy.standardRule.Order.Move) {
-                    if (Utils.isMovableViaSea(board.map, order.unit.location.province, unit.location.province, board.units) &&
-                        Utils.isMovableViaSea(board.map, unit.location.province, order.destination.province, board.units)) {
-                        candidates.add(new Orders.Convoy(unit, order));
+            };
+            const replaceBySupport = () => {
+                const supportable = Utils.supportableLocationsOf(board.map, unit);
+                const candidates = new Set();
+                // Units of the same power
+                original.forEach(order => {
+                    if (order === target)
+                        return;
+                    if (order instanceof diplomacy.standardRule.Order.Move) {
+                        if (supportable.has(order.destination)) {
+                            candidates.add(new Orders.Support(unit, order));
+                        }
                     }
-                }
-            });
-            // Units of the other powers
-            board.units.forEach(unit2 => {
-                if (unit2.power === this.power)
-                    return;
-                const ls = Array.from(Utils.movableViaConvoyLocationsOf(board, unit2));
-                ls.forEach(l => {
-                    if (Utils.isMovableViaSea(board.map, unit2.location.province, unit.location.province, board.units) &&
-                        Utils.isMovableViaSea(board.map, unit.location.province, l.province, board.units)) {
-                        candidates.add(new Orders.Convoy(unit, new Orders.Move(unit2, l)));
+                    else {
+                        if (supportable.has(order.unit.location)) {
+                            candidates.add(new Orders.Support(unit, new Orders.Hold(order.unit)));
+                        }
                     }
                 });
-            });
-            let cs = Array.from(candidates);
-            if (target instanceof Orders.Convoy) {
-                cs = cs.filter(x => {
-                    (x.target.destination === target.target.destination) && (x.target.unit === target.target.unit);
+                // Units of the other powers
+                const f = () => {
+                    const candidates = new Set();
+                    board.units.forEach(unit2 => {
+                        if (unit2.power === this.power)
+                            return;
+                        const ls = Array.from(Utils.movableLocationsOf(board, unit2)).filter(l => supportable.has(l));
+                        ls.forEach(l => {
+                            candidates.add(new Orders.Support(unit, new Orders.Move(unit2, l)));
+                        });
+                        if (supportable.has(unit2.location)) {
+                            candidates.add(new Orders.Support(unit, new Orders.Hold(unit2)));
+                        }
+                    });
+                    return candidates;
+                };
+                const cs2 = memoForSupportable.get(unit) || f();
+                if (!memoForSupportable.has(unit)) {
+                    memoForSupportable.set(unit, cs2);
+                }
+                let cs = Array.from(candidates).concat(Array.from(cs2));
+                if (target instanceof Orders.Support) {
+                    cs = cs.filter(x => {
+                        (x.destination === target.destination) && (x.target.unit === target.target.unit);
+                    });
+                }
+                if (cs.length !== 0) {
+                    const cIndex = Math.floor(Math.random() * cs.length);
+                    arr[index] = cs[cIndex];
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            };
+            const replaceByConvoy = () => {
+                const candidates = new Set();
+                // Units of the same power
+                original.forEach(order => {
+                    if (order === target)
+                        return;
+                    if (order instanceof diplomacy.standardRule.Order.Move) {
+                        if (Utils.isMovableViaSea(board.map, order.unit.location.province, unit.location.province, board.units) &&
+                            Utils.isMovableViaSea(board.map, unit.location.province, order.destination.province, board.units)) {
+                            candidates.add(new Orders.Convoy(unit, order));
+                        }
+                    }
                 });
+                // Units of the other powers
+                const f = () => {
+                    const candidates = new Set();
+                    board.units.forEach(unit2 => {
+                        if (unit2.power === this.power)
+                            return;
+                        const ls = Array.from(Utils.movableViaConvoyLocationsOf(board, unit2));
+                        ls.forEach(l => {
+                            if (Utils.isMovableViaSea(board.map, unit2.location.province, unit.location.province, board.units) &&
+                                Utils.isMovableViaSea(board.map, unit.location.province, l.province, board.units)) {
+                                candidates.add(new Orders.Convoy(unit, new Orders.Move(unit2, l)));
+                            }
+                        });
+                    });
+                    return candidates;
+                };
+                const cs2 = memoForConvoyable.get(unit) || f();
+                if (!memoForConvoyable.has(unit)) {
+                    memoForConvoyable.set(unit, cs2);
+                }
+                let cs = Array.from(candidates).concat(Array.from(cs2));
+                if (target instanceof Orders.Convoy) {
+                    cs = cs.filter(x => {
+                        (x.target.destination === target.target.destination) && (x.target.unit === target.target.unit);
+                    });
+                }
+                if (cs.length !== 0) {
+                    const cIndex = Math.floor(Math.random() * cs.length);
+                    arr[index] = cs[cIndex];
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            };
+            switch (orderType) {
+                case OrderType.Support:
+                    if (!replaceBySupport()) {
+                        // If there is no valid support orders, use hold or move
+                        replaceByMoveOrHold();
+                    }
+                    break;
+                case OrderType.Convoy:
+                    if (!replaceByConvoy()) {
+                        // If there is no valid convoy orders, use hold or move
+                        replaceByMoveOrHold();
+                    }
+                    break;
+                case OrderType.Hold:
+                case OrderType.Move:
+                    replaceByMoveOrHold();
+                    break;
             }
-            if (cs.length !== 0) {
-                const cIndex = Math.floor(Math.random() * cs.length);
-                arr[index] = cs[cIndex];
-                return true;
-            }
-            else {
-                return false;
-            }
+            return new Set(arr);
         };
-        switch (orderType) {
-            case OrderType.Support:
-                if (!replaceBySupport()) {
-                    // If there is no valid support orders, use hold or move
-                    replaceByMoveOrHold();
-                }
-                break;
-            case OrderType.Convoy:
-                if (!replaceByConvoy()) {
-                    // If there is no valid convoy orders, use hold or move
-                    replaceByMoveOrHold();
-                }
-                break;
-            case OrderType.Hold:
-            case OrderType.Move:
-                replaceByMoveOrHold();
-                break;
-        }
-        return new Set(arr);
     }
     nextRetreatOrders(game, callback) {
+        const E = this.mkEvaluateOrders(game);
         const units = Array.from(game.board.unitStatuses).filter(x => x[0].power === this.power);
         let orders = new Set(units.map(u => new Orders.Disband(u[0])));
-        let e = this.evaluateOrders(game, orders);
+        let e = E(orders);
         // Check all candidates
         function dfs(index, os) {
             const [unit, status] = units[index];
@@ -24211,6 +24245,7 @@ class PlayerBase {
     nextBuildOrder(game, callback) {
         // TODO
         const n = Utils.numberOfBuildableUnits(game.board).get(this.power);
+        const E = this.mkEvaluateOrders(game);
         if (n === undefined) {
             return new Set();
         }
@@ -24218,9 +24253,7 @@ class PlayerBase {
             callback(0);
         if (n > 0) {
             let orders = new Set();
-            let e = this.evaluateOrders(game, orders);
-            console.log(orders.size);
-            console.log(e);
+            let e = E(orders);
             const homes = Array.from(game.board.map.locations).filter(l => {
                 const status = game.board.provinceStatuses.get(l.province);
                 return (l.province.homeOf === this.power) && l.province.isSupplyCenter &&
@@ -24229,17 +24262,14 @@ class PlayerBase {
             });
             for (let i = 1; i <= n; i++) {
                 const cs = combinations(homes, i);
-                console.log(cs.size);
                 const search = (locations) => {
                     const dfs = (index, os) => {
                         const l = locations[index];
                         if (index === locations.length - 1) {
-                            console.log("update");
                             l.militaryBranches.forEach(m => {
                                 const c1 = new Set(Array.from(os));
                                 c1.add(new Orders.Build(new diplomacy.standardRule.Unit(m, l, this.power)));
-                                const e1 = this.evaluateOrders(game, c1);
-                                console.log(Array.from(c1).map(o => o.toString()));
+                                const e1 = E(c1);
                                 if (e1 > e) {
                                     orders = new Set(Array.from(c1));
                                     e = e1;
@@ -24257,7 +24287,6 @@ class PlayerBase {
                     dfs(0, new Set());
                 };
                 cs.forEach(candidate => {
-                    console.log(candidate.map(x => x.toString()));
                     const ps = new Set(candidate.map(x => x.province));
                     if (ps.size !== candidate.length) {
                         return;
@@ -24265,8 +24294,6 @@ class PlayerBase {
                     search(candidate);
                 });
             }
-            console.log(orders.size);
-            console.log(e);
             return orders;
         }
         else if (n < 0) {
@@ -24276,7 +24303,7 @@ class PlayerBase {
             const cs = combinations(units, -n);
             cs.forEach(candidate => {
                 const c1 = new Set(candidate.map(u => new Orders.Disband(u)));
-                const e1 = this.evaluateOrders(game, c1);
+                const e1 = E(c1);
                 if (orders && e) {
                     if (e1 > e) {
                         orders = c1;
@@ -24332,8 +24359,8 @@ const diplomacy = require("js-diplomacy");
 const player_base_1 = require("./player-base");
 const Orders = diplomacy.standardRule.Order;
 class RandomPlayer extends player_base_1.PlayerBase {
-    evaluateOrders(game, orders) {
-        return Math.random();
+    mkEvaluateOrders(game) {
+        return (orders) => Math.random();
     }
 }
 exports.RandomPlayer = RandomPlayer;
@@ -24361,97 +24388,9 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
         this.importance = province_importance_1.default(configs.importanceIteration, configs.map);
         this.rule = new diplomacy.standardRule.Rule();
     }
-    evaluateOrders(game, orders) {
-        if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
-            let value = 0;
-            orders.forEach(order => {
-                if (order instanceof Orders.Retreat) {
-                    value += this.importance.get(order.destination.province) || 0;
-                }
-                else {
-                    value -= this.importance.get(order.unit.location.province) || 0;
-                }
-            });
-            return value;
-        }
-        if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
-            let value = 0;
-            orders.forEach(order => {
-                if (order instanceof Orders.Build) {
-                    const o = order;
-                    const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch));
-                    const ps = new Set(xs.map(x => x.province));
-                    value += this.importance.get(o.unit.location.province) || 0;
-                    ps.forEach(p => {
-                        value += this.importance.get(p) || 0;
-                    });
-                }
-                else {
-                    const o = order;
-                    value -= this.importance.get(o.unit.location.province) || 0;
-                }
-            });
-            return value;
-        }
-        const os = Array.from(orders);
-        const supports = os.filter(x => x instanceof Orders.Support);
-        const convoys = os.filter(x => x instanceof Orders.Convoy);
-        const estimation = [];
-        // Check move orders
-        orders.forEach(order => {
-            if (order instanceof Orders.Move) {
-                if (!game.board.map.movableLocationsOf(order.unit.location, order.unit.militaryBranch)
-                    .has(order.destination)) {
-                    // Via convoy
-                    const units = convoys.filter((convoy) => {
-                        return (convoy.target.unit === order.unit) && (convoy.target.destination === order.destination);
-                    }).map(o => o.unit);
-                    if (!Utils.isMovableViaSea(game.board.map, order.unit.location.province, order.destination.province, new Set(units))) {
-                        // The move order will fail
-                        return;
-                    }
-                }
-                // The move order may success
-                estimation.push([
-                    new EstimationTarget(this.power, order.destination.province, order.unit.location.province),
-                    1
-                ]);
-            }
-            else {
-                estimation.push([
-                    new EstimationTarget(this.power, order.unit.location.province, order.unit.location.province),
-                    1
-                ]);
-            }
-        });
-        supports.forEach((support) => {
-            if (support.target.unit.power === this.power) {
-                const elem = estimation.find(elem => {
-                    return (elem[0].power === support.target.unit.power) &&
-                        (elem[0].target === support.destination.province) &&
-                        (elem[0].from === support.target.unit.location.province);
-                });
-                if (elem) {
-                    elem[1] += 1;
-                }
-            }
-            else {
-                const elem = estimation.find(elem => {
-                    return (elem[0].power === support.target.unit.power) &&
-                        (elem[0].target === support.destination.province);
-                });
-                if (elem) {
-                    elem[1] += 1;
-                }
-                else {
-                    estimation.push([
-                        new EstimationTarget(support.target.unit.power, support.destination.province, null),
-                        1
-                    ]);
-                }
-            }
-        });
-        // Units of other powers
+    mkEvaluateOrders(game) {
+        // Precompute (Units of other powers)
+        const preEstimation = [];
         game.board.units.forEach(unit => {
             if (unit.power === this.power) {
                 return;
@@ -24460,42 +24399,139 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
             ls.push(unit.location);
             const ps = new Set(ls.map(l => l.province));
             ps.forEach(province => {
-                const elem = estimation.find(elem => {
+                const elem = preEstimation.find(elem => {
                     return (elem[0].power === unit.power) && (elem[0].target === province);
                 });
                 if (elem) {
                     elem[1] += 1;
                 }
                 else {
-                    estimation.push([
+                    preEstimation.push([
                         new EstimationTarget(unit.power, province, null),
                         1
                     ]);
                 }
             });
         });
-        // evalute orders
-        let value = 0;
-        game.board.map.provinces.forEach(province => {
-            const elems = estimation.filter(elem => elem[0].target === province);
-            const maxValue = Math.max(...(elems.map(x => x[1])));
-            const maxElems = elems.filter(x => x[1] === maxValue);
-            const status = game.board.provinceStatuses.get(province);
-            if (maxElems.length == 0 && status && status.occupied === this.power) {
-                value += this.importance.get(province) || 0;
-                return;
+        return (orders) => {
+            if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
+                let value = 0;
+                orders.forEach(order => {
+                    if (order instanceof Orders.Retreat) {
+                        value += this.importance.get(order.destination.province) || 0;
+                    }
+                    else {
+                        value -= this.importance.get(order.unit.location.province) || 0;
+                    }
+                });
+                return value;
             }
-            if (maxElems.length != 1) {
-                return;
+            if (game.board.state.phase === diplomacy.standardRule.Phase.Build) {
+                let value = 0;
+                orders.forEach(order => {
+                    if (order instanceof Orders.Build) {
+                        const o = order;
+                        const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch));
+                        const ps = new Set(xs.map(x => x.province));
+                        value += this.importance.get(o.unit.location.province) || 0;
+                        ps.forEach(p => {
+                            value += this.importance.get(p) || 0;
+                        });
+                    }
+                    else {
+                        const o = order;
+                        value -= this.importance.get(o.unit.location.province) || 0;
+                    }
+                });
+                return value;
             }
-            if (maxElems.find(x => x[0].power === this.power)) {
-                value += this.importance.get(province) || 0;
-            }
-            else {
-                value += -(this.importance.get(province) || 0);
-            }
-        });
-        return value;
+            const os = Array.from(orders);
+            const supports = os.filter(x => x instanceof Orders.Support);
+            const convoys = os.filter(x => x instanceof Orders.Convoy);
+            const estimation = [];
+            preEstimation.forEach(p => {
+                estimation.push([
+                    new EstimationTarget(p[0].power, p[0].target, p[0].from),
+                    p[1]
+                ]);
+            });
+            // Check move orders
+            orders.forEach(order => {
+                if (order instanceof Orders.Move) {
+                    if (!game.board.map.movableLocationsOf(order.unit.location, order.unit.militaryBranch)
+                        .has(order.destination)) {
+                        // Via convoy
+                        const units = convoys.filter((convoy) => {
+                            return (convoy.target.unit === order.unit) && (convoy.target.destination === order.destination);
+                        }).map(o => o.unit);
+                        if (!Utils.isMovableViaSea(game.board.map, order.unit.location.province, order.destination.province, new Set(units))) {
+                            // The move order will fail
+                            return;
+                        }
+                    }
+                    // The move order may success
+                    estimation.push([
+                        new EstimationTarget(this.power, order.destination.province, order.unit.location.province),
+                        1
+                    ]);
+                }
+                else {
+                    estimation.push([
+                        new EstimationTarget(this.power, order.unit.location.province, order.unit.location.province),
+                        1
+                    ]);
+                }
+            });
+            supports.forEach((support) => {
+                if (support.target.unit.power === this.power) {
+                    const elem = estimation.find(elem => {
+                        return (elem[0].power === support.target.unit.power) &&
+                            (elem[0].target === support.destination.province) &&
+                            (elem[0].from === support.target.unit.location.province);
+                    });
+                    if (elem) {
+                        elem[1] += 1;
+                    }
+                }
+                else {
+                    const elem = estimation.find(elem => {
+                        return (elem[0].power === support.target.unit.power) &&
+                            (elem[0].target === support.destination.province);
+                    });
+                    if (elem) {
+                        elem[1] += 1;
+                    }
+                    else {
+                        estimation.push([
+                            new EstimationTarget(support.target.unit.power, support.destination.province, null),
+                            1
+                        ]);
+                    }
+                }
+            });
+            // evalute orders
+            let value = 0;
+            game.board.map.provinces.forEach(province => {
+                const elems = estimation.filter(elem => elem[0].target === province);
+                const maxValue = Math.max(...(elems.map(x => x[1]))); // Too heavy
+                const maxElems = elems.filter(x => x[1] === maxValue);
+                const status = game.board.provinceStatuses.get(province);
+                if (maxElems.length == 0 && status && status.occupied === this.power) {
+                    value += this.importance.get(province) || 0;
+                    return;
+                }
+                if (maxElems.length != 1) {
+                    return;
+                }
+                if (maxElems.find(x => x[0].power === this.power)) {
+                    value += this.importance.get(province) || 0;
+                }
+                else {
+                    value -= this.importance.get(province) || 0;
+                }
+            });
+            return value;
+        };
     }
 }
 exports.RuleBasedPlayer = RuleBasedPlayer;

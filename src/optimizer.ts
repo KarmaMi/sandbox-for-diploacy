@@ -18,6 +18,7 @@ export class SimulatedAnnealing<Target> {
   optimize (seed: Target, callback?: (progress: number) => void): Target {
     let state = seed
     let e = this.config.evaluate(state)
+    console.log("start:" + e)
     let bestState = state
     let bestE = e
     let temprature = this.config.initialTemprature
@@ -43,7 +44,7 @@ export class SimulatedAnnealing<Target> {
       }
       temprature *= this.config.alpha
     }
-
+    console.log("end:" + bestE)
     return bestState
   }
 
