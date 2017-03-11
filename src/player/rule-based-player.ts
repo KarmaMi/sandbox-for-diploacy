@@ -157,7 +157,7 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       let value = 0
       game.board.map.provinces.forEach(province => {
         const elems = estimation.filter(elem => elem[0].target === province)
-        const maxValue = Math.max(...(elems.map(x => x[1])))
+        const maxValue = Math.max(...(elems.map(x => x[1]))) // Too heavy
 
         const maxElems = elems.filter(x => x[1] === maxValue)
 

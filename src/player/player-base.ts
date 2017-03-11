@@ -10,7 +10,7 @@ export declare type Order<Power> = diplomacy.standardRule.Order.Order<Power>
 const ALPHA = 0.9
 const OPTIMIZE_ITERATION = 1
 
-const CANDIDATES_PER_UNIT = 5
+const CANDIDATES_PER_UNIT = 5 // TODO -> 7
 
 const Utils = diplomacy.standardRule.Utils
 const MilitaryBranch = diplomacy.standardRule.MilitaryBranch
