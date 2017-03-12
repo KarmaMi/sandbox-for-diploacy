@@ -43,7 +43,11 @@ function combinations<T>(array: Array<T>, k: number): Set<Array<T>> {
 }
 
 export abstract class PlayerBase<Power> {
-  constructor (protected power: Power) {}
+  private previousOrders: Set<Order<Power>>
+
+  constructor (protected power: Power) {
+    this.previousOrders = new Set()
+  }
 
   nextOrdersAsync (game: Game<Power>, callback?: (progress: number) => void): Promise<Set<Order<Power>>> {
     return new Promise((resolve) => {
@@ -72,10 +76,22 @@ export abstract class PlayerBase<Power> {
     const E = this.mkEvaluateOrders(game)
 
     // orders that all units hold
+    // allHolds ~ seed
     const allHolds = new Set(
       Array.from(game.board.units)
         .filter(unit => unit.power === this.power)
-        .map(unit => new Orders.Hold(unit))
+        .map(unit => {
+          const previous = Array.from(this.previousOrders).find(order => {
+            return (order.unit.militaryBranch === unit.militaryBranch) &&
+              (order.unit.location === unit.location) &&
+              (order.unit.power === unit.power)
+          })
+          if (previous) {
+            return previous
+          } else {
+            return new Orders.Hold(unit)
+          }
+        })
       )
     const eForAllHolds = E(allHolds)
 

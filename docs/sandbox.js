@@ -23831,10 +23831,10 @@ class SimulatedAnnealing {
     optimize(seed, callback) {
         let state = seed;
         let e = this.config.evaluate(state);
-        console.log("start:" + e);
         let bestState = state;
         let bestE = e;
         let temprature = this.config.initialTemprature;
+        let cnt = 0;
         for (let i = 0; i < this.config.iteration; i++) {
             if (callback) {
                 callback(i / this.config.iteration);
@@ -23851,10 +23851,16 @@ class SimulatedAnnealing {
             if (Math.random() <= this.probability(e, nextE, temprature)) {
                 e = nextE;
                 state = nextState;
+                cnt = 0;
+            }
+            else {
+                cnt += 1;
             }
             temprature *= this.config.alpha;
+            if (cnt >= 100) {
+                break;
+            }
         }
-        console.log("end:" + bestE);
         return bestState;
     }
     probability(e1, e2, temprature) {
@@ -23945,6 +23951,7 @@ function combinations(array, k) {
 class PlayerBase {
     constructor(power) {
         this.power = power;
+        this.previousOrders = new Set();
     }
     nextOrdersAsync(game, callback) {
         return new Promise((resolve) => {
@@ -23965,9 +23972,22 @@ class PlayerBase {
         const $$ = new diplomacy.standardRule.Helper(game.board);
         const E = this.mkEvaluateOrders(game);
         // orders that all units hold
+        // allHolds ~ seed
         const allHolds = new Set(Array.from(game.board.units)
             .filter(unit => unit.power === this.power)
-            .map(unit => new Orders.Hold(unit)));
+            .map(unit => {
+            const previous = Array.from(this.previousOrders).find(order => {
+                return (order.unit.militaryBranch === unit.militaryBranch) &&
+                    (order.unit.location === unit.location) &&
+                    (order.unit.power === unit.power);
+            });
+            if (previous) {
+                return previous;
+            }
+            else {
+                return new Orders.Hold(unit);
+            }
+        }));
         const eForAllHolds = E(allHolds);
         // Initialize simulated annealing
         const randomNeighbor = this.mkRandomNeighbor(game.board);
@@ -23988,7 +24008,7 @@ class PlayerBase {
         /* Instanciate simulated annealing */
         const numOfUnits = Array.from(game.board.units).filter(u => u.power === this.power).length;
         const optimizer = new optimizer_1.SimulatedAnnealing({
-            iteration: Math.pow(CANDIDATES_PER_UNIT, numOfUnits),
+            iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
             alpha: ALPHA,
             initialTemprature: initialTemprature,
             randomNeighbor: orders => randomNeighbor(orders),
@@ -24206,7 +24226,7 @@ class PlayerBase {
                 // Disband
                 const c1 = new Set(Array.from(os));
                 c1.add(new Orders.Disband(unit));
-                const e1 = this.evaluateOrders(game, c1);
+                const e1 = E(c1);
                 if (e1 > e) {
                     orders = c1;
                     e = e1;
@@ -24215,7 +24235,7 @@ class PlayerBase {
                 Utils.locationsToRetreat(game.board, unit, status.attackedFrom).forEach(location => {
                     const c1 = new Set(Array.from(os));
                     c1.add(new Orders.Retreat(unit, location));
-                    const e1 = this.evaluateOrders(game, c1);
+                    const e1 = E(c1);
                     if (e1 > e) {
                         orders = c1;
                         e = e1;
@@ -24237,7 +24257,9 @@ class PlayerBase {
         }
         if (callback)
             callback(0);
-        dfs(0, new Set());
+        if (units.length !== 0) {
+            dfs(0, new Set());
+        }
         if (callback)
             callback(1);
         return orders;
