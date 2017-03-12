@@ -21,6 +21,7 @@ export class SimulatedAnnealing<Target> {
     let bestState = state
     let bestE = e
     let temprature = this.config.initialTemprature
+    let cnt = 0
     for (let i = 0; i < this.config.iteration; i++) {
       if (callback) {
         callback(i / this.config.iteration)
@@ -40,8 +41,15 @@ export class SimulatedAnnealing<Target> {
       if (Math.random() <= this.probability(e, nextE, temprature)) {
         e = nextE
         state = nextState
+        cnt = 0
+      } else {
+        cnt += 1
       }
       temprature *= this.config.alpha
+
+      if (cnt >= 100) {
+        break
+      }
     }
     return bestState
   }
