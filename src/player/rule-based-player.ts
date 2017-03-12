@@ -38,7 +38,7 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
         return
       }
 
-      const ls = Array.from(Utils.movableLocationsOf(game.board, unit))
+      const ls = Array.from(game.board.map.movableLocationsOf(unit.location, unit.militaryBranch))
       ls.push(unit.location)
 
       const ps = new Set(ls.map(l => l.province))

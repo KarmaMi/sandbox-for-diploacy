@@ -18,7 +18,7 @@ import { DefensivePlayer } from "./player/defensive-player"
 import { RuleBasedPlayer } from "./player/rule-based-player"
 
 const configs = {
-  importanceIteration: 2,
+  importanceIteration: 3,
   map: diplomacy.standard.variant.initialBoard.map,
 }
 
