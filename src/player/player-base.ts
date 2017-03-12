@@ -100,7 +100,7 @@ export abstract class PlayerBase<Power> {
     /* Instanciate simulated annealing */
     const numOfUnits = Array.from(game.board.units).filter(u => u.power === this.power).length
     const optimizer = new SimulatedAnnealing({
-      iteration: Math.pow(CANDIDATES_PER_UNIT, numOfUnits),
+      iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
       alpha: ALPHA,
       initialTemprature: initialTemprature,
       randomNeighbor: orders => randomNeighbor(orders),
