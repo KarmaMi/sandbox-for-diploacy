@@ -93,55 +93,138 @@ export abstract class PlayerBase<Power> {
           }
         })
       )
-    const eForAllHolds = E(allHolds)
-
     // Initialize simulated annealing
     const randomNeighbor = this.mkRandomNeighbor(game.board)
+
+    const optimizeCluster = (cluster: Set<Unit<Power>>) => {
+      const seed = new Set(Array.from(allHolds).filter(o => cluster.has(o.unit)))
+      const eForSeed = E(seed)
+      /* Decide initial temprature */
+      let diffSum = 0
+      let num = 0
+      for (let i = 0; i < 10; i++) {
+        const n = randomNeighbor(seed)
+        if (n) {
+          diffSum = Math.abs(eForSeed - E(n))
+          num += 1
+        }
+      }
+      let initialTemprature = 1000
+      if (num !== 0) {
+        initialTemprature = (diffSum / num) / Math.log(2)
+      }
+
+      /* Instanciate simulated annealing */
+      const numOfUnits = cluster.size
+      const optimizer = new SimulatedAnnealing({
+        iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
+        alpha: ALPHA,
+        initialTemprature: initialTemprature,
+        randomNeighbor: orders => randomNeighbor(orders),
+        evaluate: (target: Set<Order<Power>>) => -E(target)
+      })
+
+      // Optimize
+      return optimizer.optimize(seed)
+    }
+
+    // Clustering
+    const clusters = new Set<Array<Unit<Power>>>()
+    const units = Array.from(game.board.units).filter(unit => unit.power === this.power)
+    units.forEach(u1 => {
+      // TODO
+      const cluster = units.filter(u2 => {
+        const ls = game.board.map.movableLocationsOf(u2.location, u2.militaryBranch)
+        return Array.from(game.board.map.movableLocationsOf(u1.location, u1.militaryBranch))
+          .find(l1 => ls.has(l1))
+      })
+
+      if (cluster.length !== 0) {
+        clusters.add(cluster)
+      }
+    })
+
+    for (let cluster of Array.from(clusters)) {
+      const c = new Set(cluster)
+      Array.from(clusters).filter(cluster2 => {
+        cluster2.every(c1 => c.has(c1))
+      }).forEach(cluster2 => {
+        clusters.delete(cluster2)
+      })
+    }
+
+    // Optimize each cluster
+    const candidates = new Map<Unit<Power>, Set<Order<Power>>>()
+    clusters.forEach(cluster => {
+      optimizeCluster(new Set(cluster)).forEach(order => {
+        if (!candidates.has(order.unit)) {
+          candidates.set(order.unit, new Set())
+        }
+        const x = candidates.get(order.unit)
+        if (x) {
+          if (Array.from(x).every(x => x.toString() !== order.toString())) {
+            x.add(order)
+          }
+        }
+      })
+    })
+
+    // Optimize using candidates
+    const eForAllHolds = E(allHolds)
+
+    const N = (orders: Set<Order<Power>>): Set<Order<Power>> => {
+      const os = Array.from(orders)
+      const r = Math.floor(Math.random() * orders.size)
+      const order = os[r]
+      if ((candidates.get(order.unit) || new Set()).size <= 1) {
+        return N(orders)
+      } else {
+        const x = Array.from(candidates.get(order.unit) || new Set()).filter(o => o !== order)
+        if (x.length <= 0) {
+          return N(orders)
+        } else {
+          const r2 = Math.floor(Math.random() * x.length)
+          os[r] = x[r2]
+          return new Set(os)
+        }
+      }
+    }
     /* Decide initial temprature */
+    const m = Array.from(candidates).reduce((p, e) => p * e[1].size, 1)
+
+    if (m == 1) {
+      const os = new Set()
+
+      candidates.forEach(e => {
+        e.forEach(o => os.add(o))
+      })
+      return os
+    }
     let diffSum = 0
     let num = 0
     for (let i = 0; i < 10; i++) {
-      const n = randomNeighbor(allHolds)
+      const n = N(allHolds)
       if (n) {
         diffSum = Math.abs(eForAllHolds - E(n))
         num += 1
       }
     }
-
     let initialTemprature = 1000
     if (num !== 0) {
       initialTemprature = (diffSum / num) / Math.log(2)
     }
 
     /* Instanciate simulated annealing */
-    const numOfUnits = Array.from(game.board.units).filter(u => u.power === this.power).length
+    const numOfUnits = allHolds.size
     const optimizer = new SimulatedAnnealing({
-      iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
+      iteration: Math.min(m, 1e5),
       alpha: ALPHA,
       initialTemprature: initialTemprature,
-      randomNeighbor: orders => randomNeighbor(orders),
+      randomNeighbor: orders => N(orders),
       evaluate: (target: Set<Order<Power>>) => -E(target)
     })
-
     // Optimize
-    let optimal = allHolds
-    let e = eForAllHolds
-    for (let i = 0; i < OPTIMIZE_ITERATION; i++) {
-      const c = optimizer.optimize(allHolds, (progress: number) => {
-        if (callback) {
-          callback(
-            (progress + i) / OPTIMIZE_ITERATION
-          )
-        }
-      })
-      const e2 = E(c)
-
-      if (e2 > e) {
-        optimal = c
-        e = e2
-      }
-    }
-    return optimal
+    return optimizer.optimize(allHolds)
   }
 
   private mkRandomNeighbor (board: Board<Power>): (original: Set<Order<Power>>) => Set<Order<Power>> | null {
