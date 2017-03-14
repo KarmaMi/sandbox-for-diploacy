@@ -31,6 +31,49 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
   }
 
   protected mkEvaluateOrders (game: Game<Power>): (orders: Set<Order<Power>>) => number {
+    // Distance
+    const D = new Map()
+    const visited = new Set()
+    const getD = (province: diplomacy.board.Province<Power>): number => {
+      if (D.has(province)) {
+        return D.get(province)
+      }
+
+      if (visited.has(province)) {
+        return 1e10
+      }
+      visited.add(province)
+
+      const s = game.board.provinceStatuses.get(province)
+
+      if (Array.from(game.board.units).some(unit => {
+        return (unit.power !== this.power) && (unit.location.province === province)
+      })) {
+        D.set(province, 0)
+        return 0
+      } else if (province.isSupplyCenter && s && s.occupied !== this.power) {
+        D.set(province, 0)
+        return 0
+      } else {
+        const neighbors1 =
+          game.board.map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Army)
+        const neighbors2 =
+          game.board.map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Fleet)
+
+        const neighbors = new Set(Array.from(neighbors1).concat(Array.from(neighbors2)))
+        const d = Math.min(...Array.from(neighbors).map(p => getD(p))) + 1
+        D.set(province, d)
+        return d
+      }
+    }
+    game.board.map.provinces.forEach(province => {
+      getD(province)
+    })
+
+    const I = (province: diplomacy.board.Province<Power>): number => {
+      return Math.pow(0.5, getD(province)) * (this.importance.get(province) || 0)
+    }
+
     // Precompute (Units of other powers)
     const preEstimation: Array<[EstimationTarget<Power>, number]> = []
     game.board.units.forEach(unit => {
@@ -58,14 +101,15 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       })
     })
 
+
     return (orders: Set<Order<Power>>) => {
       if (game.board.state.phase === diplomacy.standardRule.Phase.Retreat) {
         let value = 0
         orders.forEach(order => {
           if (order instanceof Orders.Retreat) {
-            value += this.importance.get(order.destination.province) || 0
+            value += I(order.destination.province)
           } else {
-            value -= this.importance.get(order.unit.location.province) || 0
+            value -= I(order.unit.location.province)
           }
         })
         return value
@@ -78,13 +122,13 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
             const o: diplomacy.standardRule.Order.Order<Power> = order
             const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch))
             const ps = new Set(xs.map(x => x.province))
-            value += this.importance.get(o.unit.location.province) || 0
+            value += I(o.unit.location.province)
             ps.forEach(p => {
-              value += this.importance.get(p) || 0
+              value += I(p)
             })
           } else {
             const o: diplomacy.standardRule.Order.Order<Power> = order
-            value -= this.importance.get(o.unit.location.province) || 0
+            value -= I(o.unit.location.province)
           }
         })
         return value
@@ -149,11 +193,11 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
                 (elem[0].target === support.destination.province)
             })
           if (elem) {
-            elem[1] += 1
+            elem[1] += 0.1
           } else {
             estimation.push([
               new EstimationTarget(support.target.unit.power, support.destination.province, null),
-              1
+              0.1
             ])
           }
         }
@@ -163,13 +207,17 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
       let value = 0
       game.board.map.provinces.forEach(province => {
         const elems = estimation.filter(elem => elem[0].target === province)
-        const maxValue = Math.max(...(elems.map(x => x[1]))) // Too heavy
+        const maxValue = Math.max(...(elems.map(x => x[1])))
 
         const maxElems = elems.filter(x => x[1] === maxValue)
 
-        const status = game.board.provinceStatuses.get(province)
-        if (maxElems.length == 0 && status && status.occupied === this.power) {
-          value += this.importance.get(province) || 0
+        if (maxElems.length === 0) {
+          const status = game.board.provinceStatuses.get(province)
+          if (status && province.isSupplyCenter && status.occupied !== this.power) {
+            value -= I(province)
+          } else {
+            value += I(province)
+          }
           return
         }
 
@@ -178,9 +226,9 @@ export class RuleBasedPlayer<Power> extends PlayerBase<Power> {
         }
 
         if (maxElems.find(x => x[0].power === this.power)) {
-          value += this.importance.get(province) || 0
+          value += I(province)
         } else {
-          value -= this.importance.get(province) || 0
+          value -= I(province)
         }
       })
 
