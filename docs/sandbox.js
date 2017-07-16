@@ -23709,7 +23709,7 @@ const random_player_1 = require("./player/random-player");
 const defensive_player_1 = require("./player/defensive-player");
 const rule_based_player_1 = require("./player/rule-based-player");
 const configs = {
-    importanceIteration: 2,
+    importanceIteration: 1,
     map: diplomacy.standard.variant.initialBoard.map,
 };
 const players = [
@@ -23988,14 +23988,108 @@ class PlayerBase {
                 return new Orders.Hold(unit);
             }
         }));
-        const eForAllHolds = E(allHolds);
         // Initialize simulated annealing
         const randomNeighbor = this.mkRandomNeighbor(game.board);
+        const optimizeCluster = (cluster) => {
+            const seed = new Set(Array.from(allHolds).filter(o => cluster.has(o.unit)));
+            const eForSeed = E(seed);
+            /* Decide initial temprature */
+            let diffSum = 0;
+            let num = 0;
+            for (let i = 0; i < 10; i++) {
+                const n = randomNeighbor(seed);
+                if (n) {
+                    diffSum = Math.abs(eForSeed - E(n));
+                    num += 1;
+                }
+            }
+            let initialTemprature = 1000;
+            if (num !== 0) {
+                initialTemprature = (diffSum / num) / Math.log(2);
+            }
+            /* Instanciate simulated annealing */
+            const numOfUnits = cluster.size;
+            const optimizer = new optimizer_1.SimulatedAnnealing({
+                iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
+                alpha: ALPHA,
+                initialTemprature: initialTemprature,
+                randomNeighbor: orders => randomNeighbor(orders),
+                evaluate: (target) => -E(target)
+            });
+            // Optimize
+            return optimizer.optimize(seed);
+        };
+        // Clustering
+        const clusters = new Set();
+        const units = Array.from(game.board.units).filter(unit => unit.power === this.power);
+        units.forEach(u1 => {
+            // TODO
+            const cluster = units.filter(u2 => {
+                const ls = game.board.map.movableLocationsOf(u2.location, u2.militaryBranch);
+                return Array.from(game.board.map.movableLocationsOf(u1.location, u1.militaryBranch))
+                    .find(l1 => ls.has(l1));
+            });
+            if (cluster.length !== 0) {
+                clusters.add(cluster);
+            }
+        });
+        for (let cluster of Array.from(clusters)) {
+            const c = new Set(cluster);
+            Array.from(clusters).filter(cluster2 => {
+                cluster2.every(c1 => c.has(c1));
+            }).forEach(cluster2 => {
+                clusters.delete(cluster2);
+            });
+        }
+        // Optimize each cluster
+        const candidates = new Map();
+        clusters.forEach(cluster => {
+            optimizeCluster(new Set(cluster)).forEach(order => {
+                if (!candidates.has(order.unit)) {
+                    candidates.set(order.unit, new Set());
+                }
+                const x = candidates.get(order.unit);
+                if (x) {
+                    if (Array.from(x).every(x => x.toString() !== order.toString())) {
+                        x.add(order);
+                    }
+                }
+            });
+        });
+        // Optimize using candidates
+        const eForAllHolds = E(allHolds);
+        const N = (orders) => {
+            const os = Array.from(orders);
+            const r = Math.floor(Math.random() * orders.size);
+            const order = os[r];
+            if ((candidates.get(order.unit) || new Set()).size <= 1) {
+                return N(orders);
+            }
+            else {
+                const x = Array.from(candidates.get(order.unit) || new Set()).filter(o => o !== order);
+                if (x.length <= 0) {
+                    return N(orders);
+                }
+                else {
+                    const r2 = Math.floor(Math.random() * x.length);
+                    os[r] = x[r2];
+                    return new Set(os);
+                }
+            }
+        };
         /* Decide initial temprature */
+        const m = Array.from(candidates).reduce((p, e) => p * e[1].size, 1);
+        if (m == 1) {
+            const os = new Set();
+            candidates.forEach(e => {
+                e.forEach(o => os.add(o));
+            });
+            return os;
+        }
         let diffSum = 0;
         let num = 0;
         for (let i = 0; i < 10; i++) {
-            const n = randomNeighbor(allHolds);
+            const n = N(allHolds);
             if (n) {
                 diffSum = Math.abs(eForAllHolds - E(n));
                 num += 1;
@@ -24006,30 +24100,16 @@ class PlayerBase {
             initialTemprature = (diffSum / num) / Math.log(2);
         }
         /* Instanciate simulated annealing */
-        const numOfUnits = Array.from(game.board.units).filter(u => u.power === this.power).length;
+        const numOfUnits = allHolds.size;
         const optimizer = new optimizer_1.SimulatedAnnealing({
-            iteration: Math.min(Math.pow(CANDIDATES_PER_UNIT, numOfUnits), 1e5),
+            iteration: Math.min(m, 1e5),
             alpha: ALPHA,
             initialTemprature: initialTemprature,
-            randomNeighbor: orders => randomNeighbor(orders),
+            randomNeighbor: orders => N(orders),
             evaluate: (target) => -E(target)
         });
         // Optimize
-        let optimal = allHolds;
-        let e = eForAllHolds;
-        for (let i = 0; i < OPTIMIZE_ITERATION; i++) {
-            const c = optimizer.optimize(allHolds, (progress) => {
-                if (callback) {
-                    callback((progress + i) / OPTIMIZE_ITERATION);
-                }
-            });
-            const e2 = E(c);
-            if (e2 > e) {
-                optimal = c;
-                e = e2;
-            }
-        }
-        return optimal;
+        return optimizer.optimize(allHolds);
     }
     mkRandomNeighbor(board) {
         const memoForMovableLocations = new Map();
@@ -24356,21 +24436,30 @@ exports.PlayerBase = PlayerBase;
 Object.defineProperty(exports, "__esModule", { value: true });
 const diplomacy = require("js-diplomacy");
 function provinceImportance(iteration, map) {
-    if (iteration === 0) {
-        return new Map(Array.from(map.provinces).map(province => {
-            return [province, province.isSupplyCenter ? 1 : 0];
-        }));
+    const maxNeighbors = Math.max(...Array.from(map.provinces).map(province => {
+        const neighbors1 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Army);
+        const neighbors2 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Fleet);
+        const neighbors = new Set(Array.from(neighbors1).concat(Array.from(neighbors2)));
+        return neighbors.size;
+    }));
+    function I(iteration) {
+        if (iteration === 0) {
+            return new Map(Array.from(map.provinces).map(province => {
+                return [province, province.isSupplyCenter ? 1 : 0];
+            }));
+        }
+        else {
+            const prev = I(iteration - 1);
+            return new Map(Array.from(map.provinces).map(province => {
+                const neighbors1 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Army);
+                const neighbors2 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Fleet);
+                const neighbors = new Set(Array.from(neighbors1).concat(Array.from(neighbors2)));
+                const n = Array.from(neighbors).reduce((sum, province) => sum + (prev.get(province) || 0) / maxNeighbors, prev.get(province) || 0);
+                return ([province, n]);
+            }));
+        }
     }
-    else {
-        const prev = provinceImportance(iteration - 1, map);
-        return new Map(Array.from(map.provinces).map(province => {
-            const neighbors1 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Army);
-            const neighbors2 = map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Fleet);
-            const neighbors = new Set(Array.from(neighbors1).concat(Array.from(neighbors2)));
-            const n = Array.from(neighbors).reduce((sum, province) => sum + (prev.get(province) || 0), prev.get(province) || 0);
-            return ([province, n]);
-        }));
-    }
+    return I(iteration);
 }
 exports.default = provinceImportance;
 
@@ -24411,13 +24500,50 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
         this.rule = new diplomacy.standardRule.Rule();
     }
     mkEvaluateOrders(game) {
+        // Distance
+        const D = new Map();
+        const visited = new Set();
+        const getD = (province) => {
+            if (D.has(province)) {
+                return D.get(province);
+            }
+            if (visited.has(province)) {
+                return 1e10;
+            }
+            visited.add(province);
+            const s = game.board.provinceStatuses.get(province);
+            if (Array.from(game.board.units).some(unit => {
+                return (unit.power !== this.power) && (unit.location.province === province);
+            })) {
+                D.set(province, 0);
+                return 0;
+            }
+            else if (province.isSupplyCenter && s && s.occupied !== this.power) {
+                D.set(province, 0);
+                return 0;
+            }
+            else {
+                const neighbors1 = game.board.map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Army);
+                const neighbors2 = game.board.map.movableProvincesOf(province, diplomacy.standardRule.MilitaryBranch.Fleet);
+                const neighbors = new Set(Array.from(neighbors1).concat(Array.from(neighbors2)));
+                const d = Math.min(...Array.from(neighbors).map(p => getD(p))) + 1;
+                D.set(province, d);
+                return d;
+            }
+        };
+        game.board.map.provinces.forEach(province => {
+            getD(province);
+        });
+        const I = (province) => {
+            return Math.pow(0.5, getD(province)) * (this.importance.get(province) || 0);
+        };
         // Precompute (Units of other powers)
         const preEstimation = [];
         game.board.units.forEach(unit => {
             if (unit.power === this.power) {
                 return;
             }
-            const ls = Array.from(Utils.movableLocationsOf(game.board, unit));
+            const ls = Array.from(game.board.map.movableLocationsOf(unit.location, unit.militaryBranch));
             ls.push(unit.location);
             const ps = new Set(ls.map(l => l.province));
             ps.forEach(province => {
@@ -24440,10 +24566,10 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
                 let value = 0;
                 orders.forEach(order => {
                     if (order instanceof Orders.Retreat) {
-                        value += this.importance.get(order.destination.province) || 0;
+                        value += I(order.destination.province);
                     }
                     else {
-                        value -= this.importance.get(order.unit.location.province) || 0;
+                        value -= I(order.unit.location.province);
                     }
                 });
                 return value;
@@ -24455,14 +24581,14 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
                         const o = order;
                         const xs = Array.from(game.board.map.movableLocationsOf(o.unit.location, o.unit.militaryBranch));
                         const ps = new Set(xs.map(x => x.province));
-                        value += this.importance.get(o.unit.location.province) || 0;
+                        value += I(o.unit.location.province);
                         ps.forEach(p => {
-                            value += this.importance.get(p) || 0;
+                            value += I(p);
                         });
                     }
                     else {
                         const o = order;
-                        value -= this.importance.get(o.unit.location.province) || 0;
+                        value -= I(o.unit.location.province);
                     }
                 });
                 return value;
@@ -24521,12 +24647,12 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
                             (elem[0].target === support.destination.province);
                     });
                     if (elem) {
-                        elem[1] += 1;
+                        elem[1] += 0.1;
                     }
                     else {
                         estimation.push([
                             new EstimationTarget(support.target.unit.power, support.destination.province, null),
-                            1
+                            0.1
                         ]);
                     }
                 }
@@ -24535,21 +24661,26 @@ class RuleBasedPlayer extends player_base_1.PlayerBase {
             let value = 0;
             game.board.map.provinces.forEach(province => {
                 const elems = estimation.filter(elem => elem[0].target === province);
-                const maxValue = Math.max(...(elems.map(x => x[1]))); // Too heavy
+                const maxValue = Math.max(...(elems.map(x => x[1])));
                 const maxElems = elems.filter(x => x[1] === maxValue);
-                const status = game.board.provinceStatuses.get(province);
-                if (maxElems.length == 0 && status && status.occupied === this.power) {
-                    value += this.importance.get(province) || 0;
+                if (maxElems.length === 0) {
+                    const status = game.board.provinceStatuses.get(province);
+                    if (status && province.isSupplyCenter && status.occupied !== this.power) {
+                        value -= I(province);
+                    }
+                    else {
+                        value += I(province);
+                    }
                     return;
                 }
                 if (maxElems.length != 1) {
                     return;
                 }
                 if (maxElems.find(x => x[0].power === this.power)) {
-                    value += this.importance.get(province) || 0;
+                    value += I(province);
                 }
                 else {
-                    value -= this.importance.get(province) || 0;
+                    value -= I(province);
                 }
             });
             return value;
